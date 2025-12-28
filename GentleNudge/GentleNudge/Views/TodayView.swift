@@ -35,7 +35,15 @@ struct TodayView: View {
             !$0.isCompleted &&
             !$0.isHabit
         }
-        .sorted { $0.priority.rawValue > $1.priority.rawValue }
+        .sorted { r1, r2 in
+            // Today items first, then by priority
+            let r1Today = r1.isDueToday || r1.isOverdue
+            let r2Today = r2.isDueToday || r2.isOverdue
+            if r1Today != r2Today {
+                return r1Today
+            }
+            return r1.priority.rawValue > r2.priority.rawValue
+        }
     }
 
     // Categories that have reminders (for jump bar)
@@ -49,7 +57,7 @@ struct TodayView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: Constants.Spacing.lg) {
+                    LazyVStack(spacing: Constants.Spacing.sm) {
                         // Category Jump Bar
                         if !categoriesWithReminders.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
@@ -95,14 +103,18 @@ struct TodayView: View {
                                     Text("Needs Attention")
                                         .font(.headline)
                                 }
-                                .padding(.horizontal, Constants.Spacing.xs)
 
-                                VStack(spacing: Constants.Spacing.xs) {
+                                VStack(spacing: 4) {
                                     ForEach(overdueReminders + urgentReminders) { reminder in
                                         NeedsAttentionRow(reminder: reminder)
                                     }
                                 }
                             }
+                            .padding(Constants.Spacing.md)
+                            .background(
+                                RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
+                                    .fill(Color.red.opacity(0.06))
+                            )
                         }
 
                         // Categories with reminders
@@ -141,41 +153,39 @@ struct HabitsSection: View {
             HStack {
                 Image(systemName: "heart.circle.fill")
                     .foregroundStyle(.red)
-                Text("Daily Habits")
+                Text("Habits")
                     .font(.headline)
                 Spacer()
                 Text("\(completedCount)/\(habits.count)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, Constants.Spacing.xs)
 
             // Progress bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: 3)
                         .fill(Color.red.opacity(0.2))
-                        .frame(height: 8)
+                        .frame(height: 5)
 
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: 3)
                         .fill(Color.red)
-                        .frame(width: geo.size.width * CGFloat(completedCount) / CGFloat(max(habits.count, 1)), height: 8)
+                        .frame(width: geo.size.width * CGFloat(completedCount) / CGFloat(max(habits.count, 1)), height: 5)
                         .animation(.spring, value: completedCount)
                 }
             }
-            .frame(height: 8)
-            .padding(.horizontal, Constants.Spacing.xs)
+            .frame(height: 5)
 
-            VStack(spacing: Constants.Spacing.xxs) {
+            VStack(spacing: 4) {
                 ForEach(habits) { habit in
                     HabitRow(habit: habit)
                 }
             }
         }
-        .padding()
+        .padding(Constants.Spacing.md)
         .background(
-            RoundedRectangle(cornerRadius: Constants.CornerRadius.lg)
-                .fill(Color.red.opacity(0.08))
+            RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
+                .fill(Color.red.opacity(0.06))
         )
     }
 }
@@ -200,7 +210,7 @@ struct HabitRow: View {
                 }
             } label: {
                 Image(systemName: isCompletedToday ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
+                    .font(.title3)
                     .foregroundStyle(isCompletedToday ? .green : .secondary)
                     .contentTransition(.symbolEffect(.replace))
             }
@@ -212,17 +222,10 @@ struct HabitRow: View {
                 .strikethrough(isCompletedToday)
 
             Spacer()
-
-            if !habit.notes.isEmpty {
-                Text(habit.notes)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
         }
         .padding(.vertical, Constants.Spacing.xs)
-        .padding(.horizontal, Constants.Spacing.sm)
-        .background(AppColors.background.opacity(0.8))
+        .padding(.horizontal, Constants.Spacing.xs)
+        .background(AppColors.background.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
     }
 }
@@ -246,31 +249,30 @@ struct NeedsAttentionRow: View {
                 }
             } label: {
                 Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
+                    .font(.title3)
                     .foregroundStyle(reminder.isCompleted ? .green : .secondary)
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
 
-            // Title and details
-            VStack(alignment: .leading, spacing: 2) {
-                Text(reminder.title)
-                    .font(.body)
-                    .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
-                    .strikethrough(reminder.isCompleted)
-                    .lineLimit(1)
-
-                if let dueDate = reminder.dueDate {
-                    Text(dueDate.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(reminder.isOverdue ? .red : .secondary)
+            // Title
+            Text(reminder.title)
+                .font(.body)
+                .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
+                .strikethrough(reminder.isCompleted)
+                .lineLimit(1)
+                .onTapGesture {
+                    showingDetail = true
                 }
-            }
-            .onTapGesture {
-                showingDetail = true
-            }
 
             Spacer()
+
+            // Due date
+            if let dueDate = reminder.dueDate {
+                Text(dueDate.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundStyle(reminder.isOverdue ? Color.red : Color.secondary)
+            }
 
             // Tomorrow button
             Button {
@@ -279,19 +281,18 @@ struct NeedsAttentionRow: View {
                     postponeToTomorrow()
                 }
             } label: {
-                Text("Tomorrow")
-                    .font(.caption)
-                    .fontWeight(.medium)
+                Text("→")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
                     .foregroundStyle(.white)
-                    .padding(.horizontal, Constants.Spacing.sm)
-                    .padding(.vertical, Constants.Spacing.xs)
+                    .frame(width: 28, height: 28)
                     .background(Color.orange)
-                    .clipShape(Capsule())
+                    .clipShape(Circle())
             }
             .buttonStyle(.plain)
         }
         .padding(.vertical, Constants.Spacing.xs)
-        .padding(.horizontal, Constants.Spacing.sm)
+        .padding(.horizontal, Constants.Spacing.xs)
         .background(AppColors.background)
         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
         .sheet(isPresented: $showingDetail) {
@@ -334,19 +335,18 @@ struct HomeCategorySection: View {
                 }
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, Constants.Spacing.xs)
 
             // Reminders list
-            VStack(spacing: Constants.Spacing.xs) {
+            VStack(spacing: 4) {
                 ForEach(reminders) { reminder in
                     ReminderRow(reminder: reminder)
                 }
             }
         }
-        .padding()
+        .padding(Constants.Spacing.md)
         .background(
-            RoundedRectangle(cornerRadius: Constants.CornerRadius.lg)
-                .fill(category.color.opacity(0.08))
+            RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
+                .fill(category.color.opacity(0.06))
         )
     }
 }
@@ -359,7 +359,15 @@ struct CategoryDetailView: View {
 
     private var categoryReminders: [Reminder] {
         reminders.filter { $0.category?.id == category.id && !$0.isCompleted }
-            .sorted { $0.priority.rawValue > $1.priority.rawValue }
+            .sorted { r1, r2 in
+                // Today/overdue items first, then by priority
+                let r1Today = r1.isDueToday || r1.isOverdue
+                let r2Today = r2.isDueToday || r2.isOverdue
+                if r1Today != r2Today {
+                    return r1Today
+                }
+                return r1.priority.rawValue > r2.priority.rawValue
+            }
     }
 
     private var completedReminders: [Reminder] {

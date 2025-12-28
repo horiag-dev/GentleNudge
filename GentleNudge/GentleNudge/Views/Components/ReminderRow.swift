@@ -11,7 +11,7 @@ struct ReminderRow: View {
         NavigationLink {
             ReminderDetailView(reminder: reminder)
         } label: {
-            HStack(spacing: Constants.Spacing.sm) {
+            HStack(alignment: .top, spacing: Constants.Spacing.xs) {
                 // Completion Button
                 Button {
                     withAnimation(Constants.Animation.spring) {
@@ -24,62 +24,50 @@ struct ReminderRow: View {
                     }
                 } label: {
                     Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
-                        .font(.title2)
+                        .font(.body)
                         .foregroundStyle(reminder.isCompleted ? .green : .secondary)
                         .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
+                .padding(.top, 2)
 
-                VStack(alignment: .leading, spacing: Constants.Spacing.xxs) {
-                    // Title
+                // Title and metadata
+                VStack(alignment: .leading, spacing: 2) {
                     Text(reminder.title)
-                        .font(.body)
-                        .fontWeight(.medium)
+                        .font(.subheadline)
                         .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
                         .strikethrough(reminder.isCompleted)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: Constants.Spacing.xs) {
-                        // Due Date
-                        if let formattedDate = reminder.formattedDueDate {
-                            Label(formattedDate, systemImage: "calendar")
-                                .font(.caption)
-                                .foregroundStyle(reminder.isOverdue ? .red : .secondary)
-                        }
-
-                        // Priority
+                    // Priority & Date
+                    HStack(spacing: 4) {
                         if let icon = reminder.priority.icon {
                             Image(systemName: icon)
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(reminder.priority.color)
                         }
 
-                        // Recurrence Badge
-                        if reminder.isRecurring {
-                            RecurrenceBadge(recurrence: reminder.recurrence)
-                        }
-                    }
-
-                    // AI Enhanced Description
-                    if let aiDescription = reminder.aiEnhancedDescription, !aiDescription.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "sparkles")
+                        if reminder.isDueToday {
+                            Text("Today")
                                 .font(.caption2)
-                            Text(aiDescription)
-                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        } else if reminder.isOverdue {
+                            Text("Overdue")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
                         }
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                     }
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(.caption2)
+                    .foregroundStyle(.quaternary)
+                    .padding(.top, 4)
             }
-            .padding(Constants.Spacing.sm)
+            .padding(.vertical, 6)
+            .padding(.horizontal, Constants.Spacing.xs)
         }
         .buttonStyle(.plain)
         .contextMenu {
