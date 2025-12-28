@@ -2,8 +2,26 @@ import SwiftUI
 
 enum Constants {
     // MARK: - Claude API
-    // Replace with your Claude API key from https://console.anthropic.com/
-    static let claudeAPIKey = "YOUR_CLAUDE_API_KEY_HERE"
+    private static let apiKeyUserDefaultsKey = "claudeAPIKey"
+
+    static var claudeAPIKey: String {
+        get {
+            // Check UserDefaults first, then fall back to hardcoded value
+            if let storedKey = UserDefaults.standard.string(forKey: apiKeyUserDefaultsKey),
+               !storedKey.isEmpty {
+                return storedKey
+            }
+            return "YOUR_CLAUDE_API_KEY_HERE"
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: apiKeyUserDefaultsKey)
+        }
+    }
+
+    static var isAPIKeyConfigured: Bool {
+        claudeAPIKey != "YOUR_CLAUDE_API_KEY_HERE" && !claudeAPIKey.isEmpty
+    }
+
     static let claudeAPIURL = "https://api.anthropic.com/v1/messages"
     static let claudeModel = "claude-sonnet-4-20250514"
 

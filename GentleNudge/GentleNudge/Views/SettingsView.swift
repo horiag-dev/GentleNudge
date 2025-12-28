@@ -12,6 +12,8 @@ struct SettingsView: View {
     @State private var showingResetConfirmation = false
     @State private var showingImport = false
     @State private var showingGenerateConfirmation = false
+    @State private var apiKeyInput = ""
+    @State private var showingAPIKeyField = false
 
     enum SyncStatus {
         case idle
@@ -89,12 +91,43 @@ struct SettingsView: View {
 
                 // AI Settings
                 Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Claude API Key")
-                            .font(.subheadline)
-                        Text(Constants.claudeAPIKey == "YOUR_CLAUDE_API_KEY_HERE" ? "Not configured" : "Configured")
-                            .font(.caption)
-                            .foregroundStyle(Constants.claudeAPIKey == "YOUR_CLAUDE_API_KEY_HERE" ? .red : .green)
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        Text(Constants.isAPIKeyConfigured ? "Configured" : "Not configured")
+                            .foregroundStyle(Constants.isAPIKeyConfigured ? .green : .red)
+                    }
+
+                    if showingAPIKeyField {
+                        SecureField("Enter API Key", text: $apiKeyInput)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+
+                        Button {
+                            if !apiKeyInput.isEmpty {
+                                Constants.claudeAPIKey = apiKeyInput
+                                apiKeyInput = ""
+                                showingAPIKeyField = false
+                                HapticManager.notification(.success)
+                            }
+                        } label: {
+                            Label("Save API Key", systemImage: "checkmark.circle.fill")
+                        }
+                        .disabled(apiKeyInput.isEmpty)
+
+                        Button(role: .cancel) {
+                            apiKeyInput = ""
+                            showingAPIKeyField = false
+                        } label: {
+                            Text("Cancel")
+                        }
+                    } else {
+                        Button {
+                            showingAPIKeyField = true
+                        } label: {
+                            Label(Constants.isAPIKeyConfigured ? "Update API Key" : "Enter API Key", systemImage: "key.fill")
+                        }
                     }
 
                     Link(destination: URL(string: "https://console.anthropic.com/")!) {
@@ -103,7 +136,7 @@ struct SettingsView: View {
                 } header: {
                     Text("AI Enhancement")
                 } footer: {
-                    Text("To use AI features, add your Claude API key in Constants.swift")
+                    Text("Enter your Claude API key to enable AI features like reminder enhancement and category suggestions.")
                 }
 
                 // Statistics

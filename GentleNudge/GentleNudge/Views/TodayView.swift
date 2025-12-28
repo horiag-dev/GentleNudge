@@ -12,13 +12,13 @@ struct TodayView: View {
             .sorted { $0.title < $1.title }
     }
 
-    // Urgent: Items with a specific time today
+    // Urgent: Items due today but NOT overdue yet
     private var urgentReminders: [Reminder] {
         reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            guard let dueDate = reminder.dueDate else { return false }
-            // Has a specific time today (not just date)
-            return reminder.isDueToday
+            guard reminder.dueDate != nil else { return false }
+            // Due today but not yet overdue (to avoid duplicates with overdueReminders)
+            return reminder.isDueToday && !reminder.isOverdue
         }
         .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
     }

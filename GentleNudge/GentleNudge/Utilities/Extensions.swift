@@ -93,6 +93,92 @@ extension String {
     }
 }
 
+// MARK: - Flow Layout (Wrapping)
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+        for (index, frame) in result.frames.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: .unspecified)
+        }
+    }
+
+    private func arrangeSubviews(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        let maxWidth = proposal.width ?? .infinity
+        var frames: [CGRect] = []
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var totalWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+
+            if currentX + size.width > maxWidth && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            frames.append(CGRect(x: currentX, y: currentY, width: size.width, height: size.height))
+            lineHeight = max(lineHeight, size.height)
+            currentX += size.width + spacing
+            totalWidth = max(totalWidth, currentX - spacing)
+            totalHeight = currentY + lineHeight
+        }
+
+        return (CGSize(width: totalWidth, height: totalHeight), frames)
+    }
+}
+
+// MARK: - Linked Text (Clickable URLs)
+
+struct LinkedText: View {
+    let text: String
+    let font: Font
+    let foregroundStyle: Color
+
+    init(_ text: String, font: Font = .body, foregroundStyle: Color = .primary) {
+        self.text = text
+        self.font = font
+        self.foregroundStyle = foregroundStyle
+    }
+
+    var body: some View {
+        Text(attributedString)
+            .font(font)
+            .tint(.blue)
+    }
+
+    private var attributedString: AttributedString {
+        var attributedString = AttributedString(text)
+        attributedString.foregroundColor = UIColor(foregroundStyle)
+
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let matches = detector?.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)) ?? []
+
+        for match in matches {
+            guard let range = Range(match.range, in: text),
+                  let url = match.url,
+                  let attributedRange = Range(range, in: attributedString) else { continue }
+
+            attributedString[attributedRange].link = url
+            attributedString[attributedRange].foregroundColor = .blue
+            attributedString[attributedRange].underlineStyle = .single
+        }
+
+        return attributedString
+    }
+}
+
 // MARK: - Haptics
 
 enum HapticManager {

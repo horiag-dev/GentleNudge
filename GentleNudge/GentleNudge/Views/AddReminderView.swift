@@ -16,6 +16,8 @@ struct AddReminderView: View {
     @State private var recurrence: RecurrenceType = .none
 
     @State private var isSuggestingCategory = false
+    @State private var isEnhancing = false
+    @State private var aiContext = ""
     @State private var showingDatePicker = false
 
     var body: some View {
@@ -49,40 +51,99 @@ struct AddReminderView: View {
                             .padding()
                             .background(AppColors.secondaryBackground)
                             .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+
+                        // Show clickable links if notes contain URLs
+                        if !notes.extractedURLs.isEmpty {
+                            VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
+                                ForEach(notes.extractedURLs, id: \.absoluteString) { url in
+                                    Link(destination: url) {
+                                        HStack {
+                                            Image(systemName: "link")
+                                            Text(url.host ?? url.absoluteString)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            Image(systemName: "arrow.up.right.square")
+                                                .font(.caption)
+                                        }
+                                        .font(.subheadline)
+                                        .foregroundStyle(.blue)
+                                        .padding(Constants.Spacing.sm)
+                                        .background(Color.blue.opacity(0.1))
+                                        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // AI Enhance Button
+                    VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
+                        Button {
+                            enhanceWithAI()
+                        } label: {
+                            HStack {
+                                if isEnhancing {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "sparkles")
+                                }
+                                Text(isEnhancing ? "Enhancing..." : "Enhance with AI")
+                                    .fontWeight(.medium)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(
+                                LinearGradient(
+                                    colors: [.purple.opacity(0.8), .blue.opacity(0.8)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+                        }
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isEnhancing)
+                        .opacity(title.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+
+                        if !aiContext.isEmpty {
+                            HStack(alignment: .top, spacing: Constants.Spacing.sm) {
+                                Image(systemName: "sparkles")
+                                    .foregroundStyle(.purple)
+                                Text(aiContext)
+                                    .font(.callout)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                LinearGradient(
+                                    colors: [.purple.opacity(0.1), .blue.opacity(0.1)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+                        }
                     }
 
                     // Category Selection
                     VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                        HStack {
-                            Text("Category")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                        Text("Category")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
 
-                            Spacer()
-
-                            AISuggestButton(
-                                title: "AI Suggest",
-                                icon: "sparkles",
-                                isLoading: isSuggestingCategory
-                            ) {
-                                suggestCategory()
-                            }
-                        }
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: Constants.Spacing.xs) {
-                                ForEach(categories) { category in
-                                    CategoryChipSelectable(
-                                        category: category,
-                                        isSelected: selectedCategory?.id == category.id
-                                    ) {
-                                        HapticManager.selection()
-                                        withAnimation(Constants.Animation.quick) {
-                                            if selectedCategory?.id == category.id {
-                                                selectedCategory = nil
-                                            } else {
-                                                selectedCategory = category
-                                            }
+                        FlowLayout(spacing: Constants.Spacing.xs) {
+                            ForEach(categories) { category in
+                                CategoryChipSelectable(
+                                    category: category,
+                                    isSelected: selectedCategory?.id == category.id
+                                ) {
+                                    HapticManager.selection()
+                                    withAnimation(Constants.Animation.quick) {
+                                        if selectedCategory?.id == category.id {
+                                            selectedCategory = nil
+                                        } else {
+                                            selectedCategory = category
                                         }
                                     }
                                 }
@@ -182,9 +243,60 @@ struct AddReminderView: View {
             recurrence: hasDueDate ? recurrence : .none
         )
 
+        if !aiContext.isEmpty {
+            reminder.aiEnhancedDescription = aiContext
+        }
+
         modelContext.insert(reminder)
         HapticManager.notification(.success)
         dismiss()
+    }
+
+    private func enhanceWithAI() {
+        guard !title.isEmpty else { return }
+
+        isEnhancing = true
+        Task {
+            do {
+                let categoryNames = categories.map { $0.name }
+                let enhanced = try await ClaudeService.shared.enhanceReminderFull(
+                    title: title,
+                    notes: notes,
+                    existingCategories: categoryNames
+                )
+
+                await MainActor.run {
+                    withAnimation {
+                        // Update title if improved
+                        if enhanced.title != title && !enhanced.title.isEmpty {
+                            title = enhanced.title
+                        }
+
+                        // Update notes if enhanced
+                        if enhanced.notes != notes && !enhanced.notes.isEmpty {
+                            notes = enhanced.notes
+                        }
+
+                        // Set category
+                        if let category = categories.first(where: { $0.name == enhanced.category }) {
+                            selectedCategory = category
+                        }
+
+                        // Set AI context
+                        if !enhanced.context.isEmpty {
+                            aiContext = enhanced.context
+                        }
+                    }
+                    HapticManager.notification(.success)
+                    isEnhancing = false
+                }
+            } catch {
+                await MainActor.run {
+                    isEnhancing = false
+                    HapticManager.notification(.error)
+                }
+            }
+        }
     }
 
     private func suggestCategory() {

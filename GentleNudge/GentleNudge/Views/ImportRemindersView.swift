@@ -251,7 +251,7 @@ struct ImportRemindersView: View {
             // Step 3: Analyze with AI (if API key is configured)
             var categoryAssignments: [Int: String] = [:]
 
-            if Constants.claudeAPIKey != "YOUR_CLAUDE_API_KEY_HERE" {
+            if Constants.isAPIKeyConfigured {
                 await MainActor.run {
                     importState = .analyzingCategories
                     statusMessage = "AI is analyzing your reminders..."

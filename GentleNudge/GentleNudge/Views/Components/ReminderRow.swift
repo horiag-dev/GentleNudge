@@ -40,11 +40,6 @@ struct ReminderRow: View {
                         .lineLimit(2)
 
                     HStack(spacing: Constants.Spacing.xs) {
-                        // Category Chip
-                        if let category = reminder.category {
-                            CategoryChip(category: category, size: .small)
-                        }
-
                         // Due Date
                         if let formattedDate = reminder.formattedDueDate {
                             Label(formattedDate, systemImage: "calendar")
@@ -85,8 +80,6 @@ struct ReminderRow: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(Constants.Spacing.sm)
-            .background(AppColors.secondaryBackground)
-            .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
         }
         .buttonStyle(.plain)
         .contextMenu {

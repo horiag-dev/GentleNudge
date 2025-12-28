@@ -69,6 +69,29 @@ struct ReminderDetailView: View {
                         .padding()
                         .background(AppColors.secondaryBackground)
                         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+
+                    // Show clickable links if notes contain URLs
+                    if !reminder.notes.extractedURLs.isEmpty {
+                        VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
+                            ForEach(reminder.notes.extractedURLs, id: \.absoluteString) { url in
+                                Link(destination: url) {
+                                    HStack {
+                                        Image(systemName: "link")
+                                        Text(url.host ?? url.absoluteString)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right.square")
+                                            .font(.caption)
+                                    }
+                                    .font(.subheadline)
+                                    .foregroundStyle(.blue)
+                                    .padding(Constants.Spacing.sm)
+                                    .background(Color.blue.opacity(0.1))
+                                    .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // AI Enhancement
@@ -105,34 +128,22 @@ struct ReminderDetailView: View {
 
                 // Category
                 VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                    HStack {
-                        Text("Category")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        AISuggestButton(
-                            title: "AI Suggest",
-                            icon: "sparkles",
-                            isLoading: isSuggestingCategory
-                        ) {
-                            suggestCategory()
-                        }
-                    }
+                    Text("Category")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: Constants.Spacing.xs) {
-                            ForEach(categories) { category in
-                                CategoryChipSelectable(
-                                    category: category,
-                                    isSelected: reminder.category?.id == category.id
-                                ) {
-                                    HapticManager.selection()
-                                    withAnimation(Constants.Animation.quick) {
-                                        if reminder.category?.id == category.id {
-                                            reminder.category = nil
-                                        } else {
-                                            reminder.category = category
-                                        }
+                    FlowLayout(spacing: Constants.Spacing.xs) {
+                        ForEach(categories) { category in
+                            CategoryChipSelectable(
+                                category: category,
+                                isSelected: reminder.category?.id == category.id
+                            ) {
+                                HapticManager.selection()
+                                withAnimation(Constants.Animation.quick) {
+                                    if reminder.category?.id == category.id {
+                                        reminder.category = nil
+                                    } else {
+                                        reminder.category = category
                                     }
                                 }
                             }

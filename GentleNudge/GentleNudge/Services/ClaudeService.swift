@@ -34,7 +34,7 @@ actor ClaudeService {
         var errorDescription: String? {
             switch self {
             case .invalidAPIKey:
-                return "Invalid API key. Please update your Claude API key in Constants.swift"
+                return "Invalid API key. Please add your Claude API key in Settings."
             case .networkError(let error):
                 return "Network error: \(error.localizedDescription)"
             case .invalidResponse:
@@ -46,7 +46,7 @@ actor ClaudeService {
     }
 
     private func makeRequest(prompt: String, maxTokens: Int = 500) async throws -> String {
-        guard Constants.claudeAPIKey != "YOUR_CLAUDE_API_KEY_HERE" else {
+        guard Constants.isAPIKeyConfigured else {
             throw ClaudeError.invalidAPIKey
         }
 
@@ -87,6 +87,13 @@ actor ClaudeService {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    struct EnhancedReminder: Sendable {
+        let title: String
+        let notes: String
+        let category: String
+        let context: String
+    }
+
     func enhanceReminder(title: String, notes: String) async throws -> String {
         let prompt = """
         You are helping to enhance a reminder with useful context. Given this reminder:
@@ -100,6 +107,77 @@ actor ClaudeService {
         """
 
         return try await makeRequest(prompt: prompt)
+    }
+
+    func enhanceReminderFull(title: String, notes: String, existingCategories: [String]) async throws -> EnhancedReminder {
+        let categoriesList = existingCategories.joined(separator: ", ")
+
+        let prompt = """
+        You are helping enhance a reminder. Given this reminder:
+
+        Title: \(title)
+        Notes: \(notes.isEmpty ? "(no notes)" : notes)
+
+        Available categories: \(categoriesList)
+
+        Please enhance this reminder by:
+        1. Improving the title if needed (make it clearer/more actionable, but keep it concise)
+        2. Adding helpful notes - IMPORTANT: If the notes contain any URLs, you MUST preserve them exactly. Add context around the URL but never remove or modify URLs.
+        3. Selecting the best category from the list
+        4. Providing a brief AI context (1-2 sentences of helpful background, e.g. what a URL/video is about)
+
+        Respond in this EXACT format with no extra text:
+        TITLE: [improved title or original if already good]
+        NOTES: [enhanced notes - MUST include any original URLs]
+        CATEGORY: [exact category name from the list]
+        CONTEXT: [brief helpful context]
+        """
+
+        let response = try await makeRequest(prompt: prompt, maxTokens: 500)
+        let lines = response.components(separatedBy: "\n")
+
+        var enhancedTitle = title
+        var enhancedNotes = notes
+        var category = existingCategories.first ?? "Misc"
+        var context = ""
+
+        // Extract URLs from original notes to ensure they're preserved
+        let urlPattern = try? NSRegularExpression(pattern: "https?://[^\\s]+", options: [])
+        let originalURLs = urlPattern?.matches(in: notes, options: [], range: NSRange(notes.startIndex..., in: notes))
+            .compactMap { Range($0.range, in: notes).map { String(notes[$0]) } } ?? []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.uppercased().hasPrefix("TITLE:") {
+                enhancedTitle = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.uppercased().hasPrefix("NOTES:") {
+                var notesValue = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                if !notesValue.isEmpty && notesValue.lowercased() != "(no notes)" {
+                    // Ensure all original URLs are preserved
+                    for url in originalURLs {
+                        if !notesValue.contains(url) {
+                            notesValue = notesValue + "\n" + url
+                        }
+                    }
+                    enhancedNotes = notesValue
+                }
+            } else if trimmed.uppercased().hasPrefix("CATEGORY:") {
+                let suggestedCat = trimmed.dropFirst(9).trimmingCharacters(in: .whitespaces)
+                // Match to existing category
+                if let match = existingCategories.first(where: { $0.lowercased() == suggestedCat.lowercased() }) {
+                    category = match
+                }
+            } else if trimmed.uppercased().hasPrefix("CONTEXT:") {
+                context = trimmed.dropFirst(8).trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        return EnhancedReminder(
+            title: enhancedTitle.isEmpty ? title : enhancedTitle,
+            notes: enhancedNotes,
+            category: category,
+            context: context
+        )
     }
 
     func suggestCategory(title: String, notes: String, existingCategories: [String]) async throws -> String {
