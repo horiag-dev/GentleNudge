@@ -310,6 +310,115 @@ actor ClaudeService {
         return assignments
     }
 
+    // MARK: - Batch Enhancement
+
+    struct BatchEnhancedReminder: Sendable {
+        let index: Int
+        let title: String
+        let notes: String
+        let category: String
+        let context: String
+    }
+
+    func enhanceBatchFull(
+        reminders: [(title: String, notes: String)],
+        existingCategories: [String]
+    ) async throws -> [BatchEnhancedReminder] {
+        guard !reminders.isEmpty else { return [] }
+
+        // Build reminder list for the prompt
+        var reminderList = ""
+        for (index, reminder) in reminders.enumerated() {
+            reminderList += "[\(index)] Title: \(reminder.title)"
+            if !reminder.notes.isEmpty {
+                reminderList += "\n    Notes: \(reminder.notes.prefix(200))"
+            }
+            reminderList += "\n"
+        }
+
+        let categoriesList = existingCategories.joined(separator: ", ")
+
+        let prompt = """
+        You are enhancing a batch of reminders. For each reminder:
+        1. Improve the title if needed (clearer/more actionable, but concise)
+        2. Enhance notes - IMPORTANT: preserve any URLs exactly as they appear
+        3. Select the best category from: \(categoriesList)
+        4. Add brief context (1 sentence of helpful background)
+
+        Reminders to enhance:
+        \(reminderList)
+
+        Respond in this EXACT format for each reminder (no extra text):
+        [INDEX]
+        TITLE: improved title
+        NOTES: enhanced notes (keep any URLs)
+        CATEGORY: category name
+        CONTEXT: brief context
+
+        Enhance all \(reminders.count) reminders.
+        """
+
+        let response = try await makeRequest(prompt: prompt, maxTokens: 3000)
+        var results: [BatchEnhancedReminder] = []
+
+        // Parse response - split by [INDEX] markers
+        let blocks = response.components(separatedBy: "[")
+        for block in blocks {
+            guard !block.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+
+            // Extract index from start of block
+            let lines = block.components(separatedBy: "\n")
+            guard let firstLine = lines.first,
+                  let indexEnd = firstLine.firstIndex(of: "]"),
+                  let index = Int(firstLine[..<indexEnd]) else { continue }
+
+            var title = ""
+            var notes = ""
+            var category = existingCategories.first ?? "Misc"
+            var context = ""
+
+            for line in lines.dropFirst() {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.uppercased().hasPrefix("TITLE:") {
+                    title = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                } else if trimmed.uppercased().hasPrefix("NOTES:") {
+                    notes = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                } else if trimmed.uppercased().hasPrefix("CATEGORY:") {
+                    let suggested = trimmed.dropFirst(9).trimmingCharacters(in: .whitespaces)
+                    if let match = existingCategories.first(where: { $0.lowercased() == suggested.lowercased() }) {
+                        category = match
+                    }
+                } else if trimmed.uppercased().hasPrefix("CONTEXT:") {
+                    context = trimmed.dropFirst(8).trimmingCharacters(in: .whitespaces)
+                }
+            }
+
+            // Preserve original URLs if they got lost
+            if index < reminders.count {
+                let originalNotes = reminders[index].notes
+                let urlPattern = try? NSRegularExpression(pattern: "https?://[^\\s]+", options: [])
+                let originalURLs = urlPattern?.matches(in: originalNotes, options: [], range: NSRange(originalNotes.startIndex..., in: originalNotes))
+                    .compactMap { Range($0.range, in: originalNotes).map { String(originalNotes[$0]) } } ?? []
+
+                for url in originalURLs {
+                    if !notes.contains(url) {
+                        notes = notes.isEmpty ? url : notes + "\n" + url
+                    }
+                }
+
+                results.append(BatchEnhancedReminder(
+                    index: index,
+                    title: title.isEmpty ? reminders[index].title : title,
+                    notes: notes.isEmpty ? originalNotes : notes,
+                    category: category,
+                    context: context
+                ))
+            }
+        }
+
+        return results
+    }
+
     func suggestCategoriesForImport(
         reminders: [(title: String, notes: String, listName: String)]
     ) async throws -> [String] {

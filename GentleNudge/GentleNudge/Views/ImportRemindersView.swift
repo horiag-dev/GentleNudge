@@ -293,36 +293,45 @@ struct ImportRemindersView: View {
             var enhancedReminders: [Int: EnhancedData] = [:]
 
             if shouldEnhance {
-                // Full AI enhancement - update title, notes, category for each reminder
+                // Full AI enhancement in batches - update title, notes, category
                 await MainActor.run {
                     importState = .enhancing
                     statusMessage = "AI is enhancing your reminders..."
                     progress = 0.5
                 }
 
-                for (index, imported) in fetched.enumerated() {
+                let reminderData = fetched.map { (title: $0.title, notes: $0.notes) }
+                let batchSize = 10 // Smaller batches for full enhancement due to larger response
+
+                for batchStart in stride(from: 0, to: reminderData.count, by: batchSize) {
+                    let batchEnd = min(batchStart + batchSize, reminderData.count)
+                    let batch = Array(reminderData[batchStart..<batchEnd])
+
                     do {
-                        let enhanced = try await ClaudeService.shared.enhanceReminderFull(
-                            title: imported.title,
-                            notes: imported.notes,
+                        let enhanced = try await ClaudeService.shared.enhanceBatchFull(
+                            reminders: batch,
                             existingCategories: categoryNames
                         )
 
-                        enhancedReminders[index] = EnhancedData(
-                            title: enhanced.title,
-                            notes: enhanced.notes,
-                            categoryName: enhanced.category,
-                            context: enhanced.context
-                        )
+                        for item in enhanced {
+                            let actualIndex = batchStart + item.index
+                            if actualIndex < fetched.count {
+                                enhancedReminders[actualIndex] = EnhancedData(
+                                    title: item.title,
+                                    notes: item.notes,
+                                    categoryName: item.category,
+                                    context: item.context
+                                )
+                            }
+                        }
                     } catch {
-                        // Keep original if enhancement fails
-                        print("AI enhancement failed for reminder \(index): \(error)")
+                        print("AI enhancement failed for batch: \(error)")
                     }
 
                     await MainActor.run {
-                        let progressValue = 0.5 + (0.3 * Double(index + 1) / Double(fetched.count))
+                        let progressValue = 0.5 + (0.3 * Double(batchEnd) / Double(reminderData.count))
                         progress = progressValue
-                        statusMessage = "Enhanced \(index + 1) of \(fetched.count) reminders..."
+                        statusMessage = "Enhanced \(batchEnd) of \(reminderData.count) reminders..."
                     }
                 }
             } else if Constants.isAPIKeyConfigured {

@@ -20,13 +20,13 @@ struct TodayView: View {
             // Due today but not yet overdue (to avoid duplicates with overdueReminders)
             return reminder.isDueToday && !reminder.isOverdue
         }
-        .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+        .sorted { $0.priority.rawValue > $1.priority.rawValue }
     }
 
     // Overdue (excluding habits)
     private var overdueReminders: [Reminder] {
         reminders.filter { $0.isOverdue && !$0.isCompleted && !$0.isHabit }
-            .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+            .sorted { $0.priority.rawValue > $1.priority.rawValue }
     }
 
     private func remindersForCategory(_ category: Category) -> [Reminder] {
@@ -35,49 +35,90 @@ struct TodayView: View {
             !$0.isCompleted &&
             !$0.isHabit
         }
-        .sorted { $0.createdAt > $1.createdAt }
+        .sorted { $0.priority.rawValue > $1.priority.rawValue }
+    }
+
+    // Categories that have reminders (for jump bar)
+    private var categoriesWithReminders: [Category] {
+        categories.filter { category in
+            category.name != "Habits" && !remindersForCategory(category).isEmpty
+        }
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: Constants.Spacing.lg) {
-                    // Habits Section - Daily Checklist
-                    if !habitReminders.isEmpty {
-                        HabitsSection(habits: habitReminders)
-                    }
-
-                    // Urgent / Time-sensitive
-                    if !overdueReminders.isEmpty || !urgentReminders.isEmpty {
-                        VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                            HStack(spacing: Constants.Spacing.xs) {
-                                Image(systemName: "clock.badge.exclamationmark.fill")
-                                    .foregroundStyle(.red)
-                                Text("Needs Attention")
-                                    .font(.headline)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: Constants.Spacing.lg) {
+                        // Category Jump Bar
+                        if !categoriesWithReminders.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: Constants.Spacing.sm) {
+                                    ForEach(categoriesWithReminders) { category in
+                                        Button {
+                                            withAnimation {
+                                                proxy.scrollTo(category.id, anchor: .top)
+                                            }
+                                            HapticManager.impact(.light)
+                                        } label: {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: category.icon)
+                                                    .font(.caption)
+                                                Text(category.name)
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                            }
+                                            .padding(.horizontal, Constants.Spacing.sm)
+                                            .padding(.vertical, Constants.Spacing.xs)
+                                            .background(category.color.opacity(0.15))
+                                            .foregroundStyle(category.color)
+                                            .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal, Constants.Spacing.xs)
                             }
-                            .padding(.horizontal, Constants.Spacing.xs)
+                        }
 
-                            VStack(spacing: Constants.Spacing.xs) {
-                                ForEach(overdueReminders + urgentReminders) { reminder in
-                                    NeedsAttentionRow(reminder: reminder)
+                        // Habits Section - Daily Checklist
+                        if !habitReminders.isEmpty {
+                            HabitsSection(habits: habitReminders)
+                        }
+
+                        // Urgent / Time-sensitive
+                        if !overdueReminders.isEmpty || !urgentReminders.isEmpty {
+                            VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
+                                HStack(spacing: Constants.Spacing.xs) {
+                                    Image(systemName: "clock.badge.exclamationmark.fill")
+                                        .foregroundStyle(.red)
+                                    Text("Needs Attention")
+                                        .font(.headline)
+                                }
+                                .padding(.horizontal, Constants.Spacing.xs)
+
+                                VStack(spacing: Constants.Spacing.xs) {
+                                    ForEach(overdueReminders + urgentReminders) { reminder in
+                                        NeedsAttentionRow(reminder: reminder)
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    // Categories with reminders
-                    ForEach(categories.filter { $0.name != "Habits" }) { category in
-                        let categoryReminders = remindersForCategory(category)
-                        if !categoryReminders.isEmpty {
-                            HomeCategorySection(
-                                category: category,
-                                reminders: categoryReminders
-                            )
+                        // Categories with reminders
+                        ForEach(categories.filter { $0.name != "Habits" }) { category in
+                            let categoryReminders = remindersForCategory(category)
+                            if !categoryReminders.isEmpty {
+                                HomeCategorySection(
+                                    category: category,
+                                    reminders: categoryReminders
+                                )
+                                .id(category.id)
+                            }
                         }
                     }
+                    .padding()
                 }
-                .padding()
             }
             .background(AppColors.background)
             .navigationTitle("Gentle Nudge")
@@ -318,7 +359,7 @@ struct CategoryDetailView: View {
 
     private var categoryReminders: [Reminder] {
         reminders.filter { $0.category?.id == category.id && !$0.isCompleted }
-            .sorted { ($0.createdAt) > ($1.createdAt) }
+            .sorted { $0.priority.rawValue > $1.priority.rawValue }
     }
 
     private var completedReminders: [Reminder] {
