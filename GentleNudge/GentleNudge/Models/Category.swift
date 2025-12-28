@@ -48,15 +48,14 @@ final class Category: Identifiable {
     static var defaults: [Category] {
         [
             Category(name: "Habits", icon: "heart.circle.fill", colorName: "red", isDefault: true, sortOrder: 0),
-            Category(name: "Today", icon: "sun.max.fill", colorName: "orange", isDefault: true, sortOrder: 1),
-            Category(name: "House", icon: "house.fill", colorName: "orange", isDefault: true, sortOrder: 2),
-            Category(name: "Photos", icon: "photo.fill", colorName: "purple", isDefault: true, sortOrder: 3),
-            Category(name: "Finance", icon: "dollarsign.circle.fill", colorName: "green", isDefault: true, sortOrder: 4),
-            Category(name: "To Read", icon: "book.fill", colorName: "blue", isDefault: true, sortOrder: 5),
-            Category(name: "Startup", icon: "lightbulb.fill", colorName: "yellow", isDefault: true, sortOrder: 6),
-            Category(name: "Explore", icon: "safari.fill", colorName: "teal", isDefault: true, sortOrder: 7),
-            Category(name: "GenAI", icon: "sparkles", colorName: "indigo", isDefault: true, sortOrder: 8),
-            Category(name: "Misc", icon: "tray.fill", colorName: "mint", isDefault: true, sortOrder: 9),
+            Category(name: "House", icon: "house.fill", colorName: "orange", isDefault: true, sortOrder: 1),
+            Category(name: "Photos", icon: "photo.fill", colorName: "purple", isDefault: true, sortOrder: 2),
+            Category(name: "Finance", icon: "dollarsign.circle.fill", colorName: "green", isDefault: true, sortOrder: 3),
+            Category(name: "To Read", icon: "book.fill", colorName: "blue", isDefault: true, sortOrder: 4),
+            Category(name: "Startup", icon: "lightbulb.fill", colorName: "yellow", isDefault: true, sortOrder: 5),
+            Category(name: "Explore", icon: "safari.fill", colorName: "teal", isDefault: true, sortOrder: 6),
+            Category(name: "GenAI", icon: "sparkles", colorName: "indigo", isDefault: true, sortOrder: 7),
+            Category(name: "Misc", icon: "tray.fill", colorName: "mint", isDefault: true, sortOrder: 8),
         ]
     }
 

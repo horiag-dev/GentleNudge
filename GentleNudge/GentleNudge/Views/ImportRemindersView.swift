@@ -13,12 +13,15 @@ struct ImportRemindersView: View {
     @State private var statusMessage = ""
     @State private var importedCount = 0
     @State private var errorMessage: String?
+    @State private var removeDueDates = false
+    @State private var enhanceWithAI = true
 
     enum ImportState {
         case idle
         case requestingAccess
         case fetchingReminders
         case analyzingCategories
+        case enhancing
         case importing
         case completed
         case error
@@ -100,6 +103,30 @@ struct ImportRemindersView: View {
                 // Action Buttons
                 VStack(spacing: Constants.Spacing.md) {
                     if importState == .idle {
+                        // Options
+                        VStack(spacing: Constants.Spacing.sm) {
+                            Toggle(isOn: $enhanceWithAI) {
+                                HStack {
+                                    Image(systemName: "sparkles")
+                                        .foregroundStyle(.purple)
+                                    Text("Enhance with AI")
+                                }
+                            }
+                            .disabled(!Constants.isAPIKeyConfigured)
+
+                            Toggle(isOn: $removeDueDates) {
+                                HStack {
+                                    Image(systemName: "calendar.badge.minus")
+                                        .foregroundStyle(.orange)
+                                    Text("Remove due dates")
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+                        .padding(.horizontal)
+
                         Button {
                             startImport()
                         } label: {
@@ -118,7 +145,7 @@ struct ImportRemindersView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
                         }
 
-                        Text("This will import all your Apple Reminders and use AI to categorize them.")
+                        Text("Import today's reminders from Apple Reminders.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -156,14 +183,13 @@ struct ImportRemindersView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if importState == .idle || importState == .error {
+                    if importState != .completed {
                         Button("Cancel") {
                             dismiss()
                         }
                     }
                 }
             }
-            .interactiveDismissDisabled(isImporting)
         }
     }
 
@@ -177,6 +203,8 @@ struct ImportRemindersView: View {
             return "Fetching Reminders"
         case .analyzingCategories:
             return "AI Analysis"
+        case .enhancing:
+            return "AI Enhancement"
         case .importing:
             return "Importing"
         case .completed:
@@ -188,7 +216,7 @@ struct ImportRemindersView: View {
 
     private var showProgress: Bool {
         switch importState {
-        case .fetchingReminders, .analyzingCategories, .importing:
+        case .fetchingReminders, .analyzingCategories, .enhancing, .importing:
             return true
         default:
             return false
@@ -197,7 +225,7 @@ struct ImportRemindersView: View {
 
     private var isImporting: Bool {
         switch importState {
-        case .requestingAccess, .fetchingReminders, .analyzingCategories, .importing:
+        case .requestingAccess, .fetchingReminders, .analyzingCategories, .enhancing, .importing:
             return true
         default:
             return false
@@ -211,6 +239,10 @@ struct ImportRemindersView: View {
     }
 
     private func performImport() async {
+        // Capture toggle states at start (they're @State so can't be accessed off main actor)
+        let shouldEnhance = await MainActor.run { enhanceWithAI && Constants.isAPIKeyConfigured }
+        let shouldRemoveDates = await MainActor.run { removeDueDates }
+
         do {
             // Step 1: Request Access
             await MainActor.run {
@@ -224,49 +256,89 @@ struct ImportRemindersView: View {
                 throw AppleRemindersService.SyncError.accessDenied
             }
 
-            // Step 2: Fetch Reminders
+            // Step 2: Fetch Today's Reminders
             await MainActor.run {
                 importState = .fetchingReminders
-                statusMessage = "Reading your reminders..."
+                statusMessage = "Reading today's reminders..."
                 progress = 0.2
             }
 
-            let fetched = try await AppleRemindersService.shared.fetchAllReminders()
+            let fetched = try await AppleRemindersService.shared.fetchTodayReminders()
             importedReminders = fetched
 
             await MainActor.run {
                 importedCount = fetched.count
-                statusMessage = "Found \(fetched.count) reminders"
+                statusMessage = "Found \(fetched.count) reminders due today"
                 progress = 0.4
             }
 
             guard !fetched.isEmpty else {
                 await MainActor.run {
                     importState = .completed
-                    statusMessage = "No reminders to import"
+                    statusMessage = "No reminders due today"
                 }
                 return
             }
 
-            // Step 3: Analyze with AI (if API key is configured)
-            var categoryAssignments: [Int: String] = [:]
+            // Get category names for AI
+            let categoryNames = await MainActor.run { categories.map { $0.name } }
 
-            if Constants.isAPIKeyConfigured {
+            // Step 3: AI Enhancement or Categorization
+            struct EnhancedData {
+                var title: String
+                var notes: String
+                var categoryName: String?
+                var context: String?
+            }
+            var enhancedReminders: [Int: EnhancedData] = [:]
+
+            if shouldEnhance {
+                // Full AI enhancement - update title, notes, category for each reminder
+                await MainActor.run {
+                    importState = .enhancing
+                    statusMessage = "AI is enhancing your reminders..."
+                    progress = 0.5
+                }
+
+                for (index, imported) in fetched.enumerated() {
+                    do {
+                        let enhanced = try await ClaudeService.shared.enhanceReminderFull(
+                            title: imported.title,
+                            notes: imported.notes,
+                            existingCategories: categoryNames
+                        )
+
+                        enhancedReminders[index] = EnhancedData(
+                            title: enhanced.title,
+                            notes: enhanced.notes,
+                            categoryName: enhanced.category,
+                            context: enhanced.context
+                        )
+                    } catch {
+                        // Keep original if enhancement fails
+                        print("AI enhancement failed for reminder \(index): \(error)")
+                    }
+
+                    await MainActor.run {
+                        let progressValue = 0.5 + (0.3 * Double(index + 1) / Double(fetched.count))
+                        progress = progressValue
+                        statusMessage = "Enhanced \(index + 1) of \(fetched.count) reminders..."
+                    }
+                }
+            } else if Constants.isAPIKeyConfigured {
+                // Batch categorization only (faster but no title/notes enhancement)
                 await MainActor.run {
                     importState = .analyzingCategories
                     statusMessage = "AI is analyzing your reminders..."
                     progress = 0.5
                 }
 
-                let categoryNames = categories.map { $0.name }
                 let reminderData = fetched.map { (title: $0.title, notes: $0.notes, listName: $0.listName) }
 
-                // Process in batches of 30 to avoid token limits
                 let batchSize = 30
                 for batchStart in stride(from: 0, to: reminderData.count, by: batchSize) {
                     let batchEnd = min(batchStart + batchSize, reminderData.count)
                     let batch = Array(reminderData[batchStart..<batchEnd])
-                    let batchIndices = Array(batchStart..<batchEnd)
 
                     do {
                         let assignments = try await ClaudeService.shared.analyzeBatchForCategories(
@@ -277,11 +349,15 @@ struct ImportRemindersView: View {
                         for assignment in assignments {
                             let actualIndex = batchStart + assignment.reminderIndex
                             if actualIndex < fetched.count {
-                                categoryAssignments[actualIndex] = assignment.categoryName
+                                enhancedReminders[actualIndex] = EnhancedData(
+                                    title: fetched[actualIndex].title,
+                                    notes: fetched[actualIndex].notes,
+                                    categoryName: assignment.categoryName,
+                                    context: nil
+                                )
                             }
                         }
                     } catch {
-                        // Continue without AI categorization for this batch
                         print("AI categorization failed for batch: \(error)")
                     }
 
@@ -302,9 +378,16 @@ struct ImportRemindersView: View {
 
             await MainActor.run {
                 for (index, imported) in fetched.enumerated() {
+                    let enhanced = enhancedReminders[index]
+
+                    // Determine final values
+                    let finalTitle = enhanced?.title ?? imported.title
+                    let finalNotes = enhanced?.notes ?? imported.notes
+                    let finalDueDate = shouldRemoveDates ? nil : imported.dueDate
+
                     // Find category
                     var category: Category? = nil
-                    if let categoryName = categoryAssignments[index] {
+                    if let categoryName = enhanced?.categoryName {
                         category = categories.first { $0.name == categoryName }
                     }
 
@@ -317,13 +400,18 @@ struct ImportRemindersView: View {
                     }
 
                     let reminder = Reminder(
-                        title: imported.title,
-                        notes: imported.notes,
-                        dueDate: imported.dueDate,
+                        title: finalTitle,
+                        notes: finalNotes,
+                        dueDate: finalDueDate,
                         priority: imported.priority,
                         isCompleted: imported.isCompleted,
                         category: category
                     )
+
+                    // Add AI context if available
+                    if let context = enhanced?.context, !context.isEmpty {
+                        reminder.aiEnhancedDescription = context
+                    }
 
                     modelContext.insert(reminder)
                 }

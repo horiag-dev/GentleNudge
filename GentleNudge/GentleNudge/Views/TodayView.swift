@@ -60,7 +60,7 @@ struct TodayView: View {
 
                             VStack(spacing: Constants.Spacing.xs) {
                                 ForEach(overdueReminders + urgentReminders) { reminder in
-                                    ReminderRow(reminder: reminder)
+                                    NeedsAttentionRow(reminder: reminder)
                                 }
                             }
                         }
@@ -183,6 +183,86 @@ struct HabitRow: View {
         .padding(.horizontal, Constants.Spacing.sm)
         .background(AppColors.background.opacity(0.8))
         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+    }
+}
+
+// MARK: - Needs Attention Row
+
+struct NeedsAttentionRow: View {
+    @Bindable var reminder: Reminder
+    @State private var showingDetail = false
+
+    var body: some View {
+        HStack(spacing: Constants.Spacing.sm) {
+            // Completion toggle
+            Button {
+                withAnimation(Constants.Animation.spring) {
+                    HapticManager.impact(.medium)
+                    reminder.isCompleted.toggle()
+                    if reminder.isCompleted {
+                        reminder.completedAt = Date()
+                    }
+                }
+            } label: {
+                Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(reminder.isCompleted ? .green : .secondary)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.plain)
+
+            // Title and details
+            VStack(alignment: .leading, spacing: 2) {
+                Text(reminder.title)
+                    .font(.body)
+                    .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
+                    .strikethrough(reminder.isCompleted)
+                    .lineLimit(1)
+
+                if let dueDate = reminder.dueDate {
+                    Text(dueDate.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(reminder.isOverdue ? .red : .secondary)
+                }
+            }
+            .onTapGesture {
+                showingDetail = true
+            }
+
+            Spacer()
+
+            // Tomorrow button
+            Button {
+                withAnimation(Constants.Animation.spring) {
+                    HapticManager.impact(.light)
+                    postponeToTomorrow()
+                }
+            } label: {
+                Text("Tomorrow")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, Constants.Spacing.sm)
+                    .padding(.vertical, Constants.Spacing.xs)
+                    .background(Color.orange)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, Constants.Spacing.xs)
+        .padding(.horizontal, Constants.Spacing.sm)
+        .background(AppColors.background)
+        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+        .sheet(isPresented: $showingDetail) {
+            ReminderDetailView(reminder: reminder)
+        }
+    }
+
+    private func postponeToTomorrow() {
+        let calendar = Calendar.current
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
+        // Set to 9 AM tomorrow
+        reminder.dueDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow)
     }
 }
 

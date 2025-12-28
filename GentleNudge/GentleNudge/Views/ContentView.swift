@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    @Query private var reminders: [Reminder]
     @State private var selectedTab = 0
     @State private var showingAddReminder = false
 
@@ -52,6 +53,14 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingAddReminder) {
             AddReminderView()
+        }
+        .task {
+            // Perform daily backup on app launch
+            do {
+                try await BackupService.shared.performDailyBackup(reminders: reminders)
+            } catch {
+                print("Backup failed: \(error.localizedDescription)")
+            }
         }
     }
 }

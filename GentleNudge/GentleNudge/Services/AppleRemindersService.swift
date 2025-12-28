@@ -223,6 +223,49 @@ actor AppleRemindersService {
         return allReminders
     }
 
+    func fetchTodayReminders() async throws -> [ImportedReminder] {
+        let status = checkAuthorizationStatus()
+        guard status == .authorized else {
+            throw SyncError.accessDenied
+        }
+
+        let calendars = eventStore.calendars(for: .reminder)
+            .filter { $0.title != Constants.appleRemindersListName }
+
+        // Get today's date range
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: Date())
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+
+        let predicate = eventStore.predicateForIncompleteReminders(
+            withDueDateStarting: nil,
+            ending: endOfDay,
+            calendars: calendars
+        )
+
+        let ekReminders = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[EKReminder], Error>) in
+            eventStore.fetchReminders(matching: predicate) { reminders in
+                continuation.resume(returning: reminders ?? [])
+            }
+        }
+
+        var todayReminders: [ImportedReminder] = []
+
+        for ekReminder in ekReminders {
+            let imported = ImportedReminder(
+                title: ekReminder.title ?? "Untitled",
+                notes: ekReminder.notes ?? "",
+                dueDate: ekReminder.dueDateComponents?.date,
+                isCompleted: ekReminder.isCompleted,
+                priority: mapFromEKPriority(ekReminder.priority),
+                listName: ekReminder.calendar?.title ?? "Unknown"
+            )
+            todayReminders.append(imported)
+        }
+
+        return todayReminders
+    }
+
     func getAvailableLists() -> [String] {
         let calendars = eventStore.calendars(for: .reminder)
         return calendars

@@ -26,7 +26,7 @@ enum Constants {
     static let claudeModel = "claude-sonnet-4-20250514"
 
     // MARK: - Apple Reminders
-    static let appleRemindersListName = "Gentle Nudge Backup"
+    static let appleRemindersListName = "Gentle Nudge"
 
     // MARK: - UI
     enum Spacing {

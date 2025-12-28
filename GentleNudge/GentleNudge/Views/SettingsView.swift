@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -14,6 +15,10 @@ struct SettingsView: View {
     @State private var showingGenerateConfirmation = false
     @State private var apiKeyInput = ""
     @State private var showingAPIKeyField = false
+    @State private var showingExporter = false
+    @State private var exportDocument: BackupDocument?
+    @State private var backupList: [(date: Date, url: URL, size: Int64)] = []
+    @State private var showingDeleteAllConfirmation = false
 
     enum SyncStatus {
         case idle
@@ -41,7 +46,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Import")
                 } footer: {
-                    Text("One-time import of your existing Apple Reminders. AI will analyze and categorize them automatically.")
+                    Text("Import reminders due today from Apple Reminders. AI will analyze and categorize them automatically.")
                 }
 
                 // Apple Reminders Sync
@@ -148,8 +153,48 @@ struct SettingsView: View {
                     StatRow(title: "AI Enhanced", value: "\(reminders.filter { $0.aiEnhancedDescription != nil }.count)")
                 }
 
+                // Automatic Backups
+                Section {
+                    HStack {
+                        Label("Auto Backup", systemImage: "clock.arrow.circlepath")
+                        Spacer()
+                        Text("Daily, 7 days")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if backupList.isEmpty {
+                        Text("No backups yet")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(backupList, id: \.url) { backup in
+                            HStack {
+                                Text(backup.date.formatted(date: .abbreviated, time: .omitted))
+                                Spacer()
+                                Text(formatFileSize(backup.size))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    Button {
+                        manualBackup()
+                    } label: {
+                        Label("Backup Now", systemImage: "arrow.clockwise")
+                    }
+                } header: {
+                    Text("Local Backups")
+                } footer: {
+                    Text("Backups are saved automatically each day. Last 7 days are kept.")
+                }
+
                 // Data Management
                 Section {
+                    Button {
+                        exportBackup()
+                    } label: {
+                        Label("Export to File", systemImage: "square.and.arrow.up")
+                    }
+
                     Button {
                         showingGenerateConfirmation = true
                     } label: {
@@ -161,10 +206,16 @@ struct SettingsView: View {
                     } label: {
                         Label("Delete All Completed", systemImage: "trash")
                     }
+
+                    Button(role: .destructive) {
+                        showingDeleteAllConfirmation = true
+                    } label: {
+                        Label("Delete All Reminders", systemImage: "trash.fill")
+                    }
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Generate sample reminders across all categories to test the app.")
+                    Text("Export saves a JSON file you can share or save externally.")
                 }
 
                 // About
@@ -204,9 +255,103 @@ struct SettingsView: View {
             } message: {
                 Text("This will create sample reminders across all categories, including recurring ones.")
             }
+            .confirmationDialog("Delete All Reminders", isPresented: $showingDeleteAllConfirmation) {
+                Button("Delete All", role: .destructive) {
+                    deleteAllReminders()
+                }
+            } message: {
+                Text("This will permanently delete ALL reminders. This action cannot be undone.")
+            }
             .sheet(isPresented: $showingImport) {
                 ImportRemindersView()
             }
+            .fileExporter(
+                isPresented: $showingExporter,
+                document: exportDocument,
+                contentType: .json,
+                defaultFilename: "GentleNudge-Backup-\(Date().formatted(.dateTime.year().month().day()))"
+            ) { result in
+                switch result {
+                case .success:
+                    HapticManager.notification(.success)
+                case .failure:
+                    HapticManager.notification(.error)
+                }
+            }
+            .onAppear {
+                loadBackupList()
+            }
+        }
+    }
+
+    private func loadBackupList() {
+        Task {
+            do {
+                let list = try await BackupService.shared.getBackupList()
+                await MainActor.run {
+                    backupList = list
+                }
+            } catch {
+                print("Failed to load backup list: \(error)")
+            }
+        }
+    }
+
+    private func manualBackup() {
+        Task {
+            do {
+                try await BackupService.shared.performDailyBackup(reminders: reminders)
+                loadBackupList()
+                await MainActor.run {
+                    HapticManager.notification(.success)
+                }
+            } catch {
+                await MainActor.run {
+                    HapticManager.notification(.error)
+                }
+            }
+        }
+    }
+
+    private func formatFileSize(_ size: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
+    }
+
+    private func exportBackup() {
+        var backupData: [[String: Any]] = []
+
+        for reminder in reminders {
+            var item: [String: Any] = [
+                "id": reminder.id.uuidString,
+                "title": reminder.title,
+                "notes": reminder.notes,
+                "priority": reminder.priorityRaw,
+                "isCompleted": reminder.isCompleted,
+                "createdAt": reminder.createdAt.timeIntervalSince1970,
+                "recurrence": reminder.recurrenceRaw
+            ]
+
+            if let dueDate = reminder.dueDate {
+                item["dueDate"] = dueDate.timeIntervalSince1970
+            }
+            if let completedAt = reminder.completedAt {
+                item["completedAt"] = completedAt.timeIntervalSince1970
+            }
+            if let aiDescription = reminder.aiEnhancedDescription {
+                item["aiEnhancedDescription"] = aiDescription
+            }
+            if let category = reminder.category {
+                item["categoryName"] = category.name
+            }
+
+            backupData.append(item)
+        }
+
+        if let jsonData = try? JSONSerialization.data(withJSONObject: backupData, options: .prettyPrinted) {
+            exportDocument = BackupDocument(data: jsonData)
+            showingExporter = true
         }
     }
 
@@ -278,6 +423,14 @@ struct SettingsView: View {
         HapticManager.notification(.success)
     }
 
+    private func deleteAllReminders() {
+        for reminder in reminders {
+            modelContext.delete(reminder)
+        }
+        try? modelContext.save()
+        HapticManager.notification(.success)
+    }
+
     private func generateTestReminders() {
         let calendar = Calendar.current
 
@@ -291,9 +444,6 @@ struct SettingsView: View {
                 ("Read", "At least 20 pages", 0, .none, .daily),
                 ("Meditate", "10 min session", 0, .none, .daily),
                 ("Journal", "Reflect on the day", 0, .none, .daily),
-            ]),
-            ("Today", [
-                ("Call dentist", "Reschedule appointment", 0, .medium, .none),
             ]),
             ("To Read", [
                 ("Atomic Habits", "Finish chapter 5", nil, .none, .none),
@@ -382,6 +532,24 @@ struct StatRow: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+struct BackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    var data: Data
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }
 
