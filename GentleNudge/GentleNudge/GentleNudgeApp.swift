@@ -1,6 +1,17 @@
 import SwiftUI
 import SwiftData
 
+enum StorageMode: String {
+    case cloudKit = "CloudKit"
+    case local = "Local"
+    case memory = "Memory (Temporary)"
+}
+
+class AppState: ObservableObject {
+    static let shared = AppState()
+    @Published var storageMode: StorageMode = .local
+}
+
 @main
 struct GentleNudgeApp: App {
     var sharedModelContainer: ModelContainer = {
@@ -26,7 +37,8 @@ struct GentleNudgeApp: App {
         do {
             // Try CloudKit configuration first
             let container = try ModelContainer(for: schema, configurations: [cloudKitConfig])
-            print("Using CloudKit sync")
+            print("Using CloudKit sync with container: iCloud.com.horiag.GentleNudge")
+            AppState.shared.storageMode = .cloudKit
 
             // Initialize default categories on first launch
             Task { @MainActor in
@@ -53,7 +65,8 @@ struct GentleNudgeApp: App {
             }
             do {
                 let container = try ModelContainer(for: schema, configurations: [localConfig])
-                print("Using local storage")
+                print("Using local storage (CloudKit unavailable)")
+                AppState.shared.storageMode = .local
 
                 Task { @MainActor in
                     let context = container.mainContext
@@ -81,6 +94,7 @@ struct GentleNudgeApp: App {
 
                 do {
                     let container = try ModelContainer(for: schema, configurations: [memoryConfig])
+                    AppState.shared.storageMode = .memory
 
                     Task { @MainActor in
                         let context = container.mainContext

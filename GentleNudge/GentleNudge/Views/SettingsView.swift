@@ -22,6 +22,8 @@ struct SettingsView: View {
     @State private var isMigrating = false
     @State private var migrationMessage = ""
     @State private var showingMigrationAlert = false
+    @State private var iCloudSyncStatus: SyncStatus = .idle
+    @State private var lastSyncTime: Date?
 
     enum SyncStatus {
         case idle
@@ -55,10 +57,17 @@ struct SettingsView: View {
                 // iCloud Sync
                 Section {
                     HStack {
-                        Label("iCloud Status", systemImage: "icloud.fill")
+                        Label("Storage Mode", systemImage: "externaldrive.fill")
+                        Spacer()
+                        Text(AppState.shared.storageMode.rawValue)
+                            .foregroundStyle(AppState.shared.storageMode == .cloudKit ? .green : .orange)
+                    }
+
+                    HStack {
+                        Label("iCloud Account", systemImage: "icloud.fill")
                         Spacer()
                         if FileManager.default.ubiquityIdentityToken != nil {
-                            Text("Connected")
+                            Text("Signed In")
                                 .foregroundStyle(.green)
                         } else {
                             Text("Not signed in")
@@ -71,6 +80,38 @@ struct SettingsView: View {
                         Spacer()
                         Text("\(reminders.count)")
                             .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Categories")
+                        Spacer()
+                        Text("\(categories.count)")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        forceiCloudSync()
+                    } label: {
+                        HStack {
+                            Label("Force Sync", systemImage: "arrow.triangle.2.circlepath.icloud")
+                            Spacer()
+                            if iCloudSyncStatus == .syncing {
+                                ProgressView()
+                            } else if iCloudSyncStatus == .success {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
+                    .disabled(iCloudSyncStatus == .syncing)
+
+                    if let lastSync = lastSyncTime {
+                        HStack {
+                            Text("Last sync")
+                            Spacer()
+                            Text(lastSync.formatted(date: .omitted, time: .shortened))
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Button {
@@ -88,7 +129,7 @@ struct SettingsView: View {
                 } header: {
                     Text("iCloud")
                 } footer: {
-                    Text("Both devices must be signed into the same iCloud account. Check: Settings → Apple ID (iOS) or System Settings → Apple ID (Mac).")
+                    Text("Force Sync saves all pending changes and triggers CloudKit sync. Both devices must be signed into the same iCloud account.")
                 }
 
                 // Apple Reminders Sync
@@ -273,7 +314,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text("1.1.0")
                             .foregroundStyle(.secondary)
                     }
 
@@ -518,6 +559,49 @@ struct SettingsView: View {
 
         try? modelContext.save()
         HapticManager.notification(.success)
+    }
+
+    private func forceiCloudSync() {
+        iCloudSyncStatus = .syncing
+
+        Task {
+            do {
+                // Save the context to push any pending changes
+                try modelContext.save()
+
+                // Touch all reminders to trigger CloudKit sync
+                // This forces CloudKit to re-evaluate all records
+                for reminder in reminders {
+                    // Update a non-visible property to trigger sync
+                    reminder.hasBeenSynced = true
+                }
+
+                try modelContext.save()
+
+                // Small delay to allow CloudKit to process
+                try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+                await MainActor.run {
+                    iCloudSyncStatus = .success
+                    lastSyncTime = Date()
+                    HapticManager.notification(.success)
+
+                    // Reset status after delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        iCloudSyncStatus = .idle
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    iCloudSyncStatus = .error
+                    HapticManager.notification(.error)
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        iCloudSyncStatus = .idle
+                    }
+                }
+            }
+        }
     }
 
     private func migrateToiCloud() {
