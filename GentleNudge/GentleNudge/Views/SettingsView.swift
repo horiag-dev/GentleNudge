@@ -126,10 +126,16 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(isMigrating)
+
+                    Button(role: .destructive) {
+                        resetCloudKitSync()
+                    } label: {
+                        Label("Reset Sync State", systemImage: "arrow.counterclockwise.icloud")
+                    }
                 } header: {
                     Text("iCloud")
                 } footer: {
-                    Text("Force Sync saves all pending changes and triggers CloudKit sync. Both devices must be signed into the same iCloud account.")
+                    Text("Force Sync pushes changes. Reset Sync clears the local sync token if sync gets stuck (data is preserved).")
                 }
 
                 // Apple Reminders Sync
@@ -559,6 +565,33 @@ struct SettingsView: View {
 
         try? modelContext.save()
         HapticManager.notification(.success)
+    }
+
+    private func resetCloudKitSync() {
+        // Reset the CloudKit sync by deleting the local store's sync metadata
+        // This forces a full re-sync from CloudKit
+        Task {
+            do {
+                // Save any pending changes first
+                try modelContext.save()
+
+                // Post notification to reset sync (CoreData handles this)
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("NSCloudKitMirroringDelegateWillResetSyncNotificationName"),
+                    object: nil,
+                    userInfo: ["reason": "ManualReset"]
+                )
+
+                await MainActor.run {
+                    HapticManager.notification(.success)
+                    lastSyncTime = nil
+                }
+            } catch {
+                await MainActor.run {
+                    HapticManager.notification(.error)
+                }
+            }
+        }
     }
 
     private func forceiCloudSync() {
