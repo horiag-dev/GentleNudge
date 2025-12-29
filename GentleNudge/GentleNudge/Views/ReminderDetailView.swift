@@ -246,7 +246,9 @@ struct ReminderDetailView: View {
         }
         .background(AppColors.background)
         .navigationTitle("Reminder")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
         .onAppear {
             hasDueDate = reminder.dueDate != nil
         }

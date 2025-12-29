@@ -106,7 +106,7 @@ struct TodayView: View {
                             .padding(Constants.Spacing.md)
                             .background(
                                 RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                                    .fill(Color.red.opacity(0.06))
+                                    .fill(Color.red.opacity(0.10))
                             )
                         }
 
@@ -127,7 +127,9 @@ struct TodayView: View {
             }
             .background(AppColors.background)
             .navigationTitle("Gentle Nudge")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
+            #endif
         }
     }
 }
@@ -178,7 +180,7 @@ struct HabitsSection: View {
         .padding(Constants.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                .fill(Color.red.opacity(0.06))
+                .fill(Color.red.opacity(0.10))
         )
     }
 }
@@ -334,7 +336,7 @@ struct HomeCategorySection: View {
         .padding(Constants.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                .fill(category.color.opacity(0.06))
+                .fill(category.color.opacity(0.10))
         )
     }
 }
@@ -401,7 +403,9 @@ struct CategoryDetailView: View {
         }
         .background(AppColors.background)
         .navigationTitle(category.name)
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
+        #endif
     }
 }
 

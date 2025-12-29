@@ -123,7 +123,7 @@ struct ImportRemindersView: View {
                             }
                         }
                         .padding()
-                        .background(Color(.secondarySystemBackground))
+                        .background(AppColors.secondaryBackground)
                         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
                         .padding(.horizontal)
 
@@ -180,7 +180,9 @@ struct ImportRemindersView: View {
                 .padding(.bottom)
             }
             .navigationTitle("Import")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     if importState != .completed {

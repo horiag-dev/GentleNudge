@@ -53,6 +53,7 @@ struct GentleNudgeApp: App {
             }
             do {
                 let container = try ModelContainer(for: schema, configurations: [localConfig])
+                print("Using local storage")
 
                 Task { @MainActor in
                     let context = container.mainContext
@@ -69,7 +70,30 @@ struct GentleNudgeApp: App {
 
                 return container
             } catch {
-                fatalError("Could not create ModelContainer: \(error)")
+                // Last resort: in-memory storage
+                print("Local storage failed: \(error)")
+                print("Falling back to in-memory storage (data will not persist)")
+
+                let memoryConfig = ModelConfiguration(
+                    schema: schema,
+                    isStoredInMemoryOnly: true
+                )
+
+                do {
+                    let container = try ModelContainer(for: schema, configurations: [memoryConfig])
+
+                    Task { @MainActor in
+                        let context = container.mainContext
+                        for defaultCategory in Category.defaults {
+                            context.insert(defaultCategory)
+                        }
+                        try? context.save()
+                    }
+
+                    return container
+                } catch {
+                    fatalError("Could not create any ModelContainer: \(error)")
+                }
             }
         }
     }()

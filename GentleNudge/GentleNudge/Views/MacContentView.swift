@@ -2,24 +2,30 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Main Mac Content View
+
 struct MacContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
-    @State private var selectedSection: SidebarSection? = .needsAttention
-    @State private var selectedCategory: Category?
+    @State private var selectedSidebarItem: SidebarItem? = .today
+    @State private var selectedReminder: Reminder?
     @State private var showingAddReminder = false
+    @State private var showingSettings = false
     @State private var searchText = ""
 
-    enum SidebarSection: Hashable {
-        case needsAttention
-        case habits
+    enum SidebarItem: Hashable {
+        case today
+        case scheduled
         case all
+        case completed
+        case habits
         case category(Category)
     }
 
-    // Needs Attention: overdue, due today, or high priority
+    // MARK: - Computed Properties (same order as iOS TodayView)
+
     private var needsAttentionReminders: [Reminder] {
         reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
@@ -37,452 +43,722 @@ struct MacContentView: View {
             .sorted { $0.title < $1.title }
     }
 
-    private var allReminders: [Reminder] {
+    private var scheduledReminders: [Reminder] {
+        reminders.filter { !$0.isCompleted && !$0.isHabit && $0.dueDate != nil }
+            .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+    }
+
+    private var allActiveReminders: [Reminder] {
         reminders.filter { !$0.isCompleted && !$0.isHabit }
-            .sorted { $0.priority.rawValue > $1.priority.rawValue }
+    }
+
+    private var completedReminders: [Reminder] {
+        reminders.filter { $0.isCompleted }
+            .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
     }
 
     private func remindersForCategory(_ category: Category) -> [Reminder] {
-        reminders.filter { reminder in
-            guard reminder.category?.id == category.id,
-                  !reminder.isCompleted,
-                  !reminder.isHabit else { return false }
-            return true
-        }
-        .sorted { $0.priority.rawValue > $1.priority.rawValue }
+        reminders.filter { $0.category?.id == category.id && !$0.isCompleted && !$0.isHabit }
     }
+
+    private var categoriesWithReminders: [Category] {
+        categories.filter { cat in
+            cat.name != "Habits" && reminders.contains { $0.category?.id == cat.id && !$0.isCompleted }
+        }
+    }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationSplitView {
-            // Sidebar
-            List(selection: $selectedSection) {
-                Section("Overview") {
-                    Label {
-                        HStack {
-                            Text("Needs Attention")
-                            Spacer()
-                            if !needsAttentionReminders.isEmpty {
-                                Text("\(needsAttentionReminders.count)")
-                                    .font(.caption)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.red.opacity(0.2))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                    } icon: {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundStyle(.red)
-                    }
-                    .tag(SidebarSection.needsAttention)
+            // MARK: Sidebar
+            VStack(spacing: 0) {
+                // Search
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search", text: $searchText)
+                        .textFieldStyle(.plain)
+                }
+                .padding(8)
+                .background(AppColors.secondaryBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
 
-                    Label {
-                        HStack {
-                            Text("Habits")
-                            Spacer()
-                            let completed = habitReminders.filter { $0.isCompletedToday }.count
-                            Text("\(completed)/\(habitReminders.count)")
+                // Smart Lists Grid
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    SmartListCard(
+                        icon: "calendar.circle.fill",
+                        color: .blue,
+                        title: "Today",
+                        count: needsAttentionReminders.count,
+                        isSelected: selectedSidebarItem == .today
+                    ) { selectedSidebarItem = .today }
+
+                    SmartListCard(
+                        icon: "calendar.badge.clock",
+                        color: .red,
+                        title: "Scheduled",
+                        count: scheduledReminders.count,
+                        isSelected: selectedSidebarItem == .scheduled
+                    ) { selectedSidebarItem = .scheduled }
+
+                    SmartListCard(
+                        icon: "tray.circle.fill",
+                        color: .gray,
+                        title: "All",
+                        count: allActiveReminders.count,
+                        isSelected: selectedSidebarItem == .all
+                    ) { selectedSidebarItem = .all }
+
+                    SmartListCard(
+                        icon: "heart.circle.fill",
+                        color: .pink,
+                        title: "Habits",
+                        count: habitReminders.count,
+                        isSelected: selectedSidebarItem == .habits
+                    ) { selectedSidebarItem = .habits }
+
+                    SmartListCard(
+                        icon: "checkmark.circle.fill",
+                        color: .gray,
+                        title: "Completed",
+                        count: completedReminders.count,
+                        isSelected: selectedSidebarItem == .completed
+                    ) { selectedSidebarItem = .completed }
+                }
+                .padding(12)
+
+                Divider()
+                    .padding(.horizontal, 12)
+
+                // My Lists
+                List(selection: $selectedSidebarItem) {
+                    Section("My Lists") {
+                        ForEach(categories.filter { $0.name != "Habits" }) { category in
+                            Label {
+                                HStack {
+                                    Text(category.name)
+                                    Spacer()
+                                    Text("\(remindersForCategory(category).count)")
+                                        .foregroundStyle(.secondary)
+                                        .font(.callout)
+                                }
+                            } icon: {
+                                Image(systemName: category.icon)
+                                    .foregroundStyle(category.color)
+                            }
+                            .tag(SidebarItem.category(category))
+                        }
+                    }
+
+                    Section {
+                        HStack(spacing: 6) {
+                            Image(systemName: "icloud.fill")
+                                .foregroundStyle(FileManager.default.ubiquityIdentityToken != nil ? .green : .orange)
+                                .font(.caption)
+                            Text(FileManager.default.ubiquityIdentityToken != nil ? "iCloud" : "Local")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(reminders.count)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
-                    } icon: {
-                        Image(systemName: "heart.circle.fill")
-                            .foregroundStyle(.pink)
-                    }
-                    .tag(SidebarSection.habits)
-
-                    Label("All Reminders", systemImage: "tray.full.fill")
-                        .tag(SidebarSection.all)
-                }
-
-                Section("Categories") {
-                    ForEach(categories.filter { $0.name != "Habits" }) { category in
-                        Label {
-                            HStack {
-                                Text(category.name)
-                                Spacer()
-                                let count = remindersForCategory(category).count
-                                if count > 0 {
-                                    Text("\(count)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        } icon: {
-                            Image(systemName: category.icon)
-                                .foregroundStyle(category.color)
-                        }
-                        .tag(SidebarSection.category(category))
                     }
                 }
-
-                Section("iCloud") {
-                    HStack {
-                        Image(systemName: "icloud.fill")
-                            .foregroundStyle(FileManager.default.ubiquityIdentityToken != nil ? .green : .red)
-                        Text(FileManager.default.ubiquityIdentityToken != nil ? "Connected" : "Not signed in")
-                            .font(.caption)
-                        Spacer()
-                        Text("\(reminders.count) items")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                .listStyle(.sidebar)
             }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 200, ideal: 250)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
             .toolbar {
-                ToolbarItem {
-                    Button {
-                        showingAddReminder = true
-                    } label: {
-                        Image(systemName: "plus")
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showingSettings = true } label: {
+                        Image(systemName: "gear")
                     }
                 }
             }
         } detail: {
-            // Detail view based on selection
-            Group {
-                switch selectedSection {
-                case .needsAttention:
-                    MacReminderListView(
-                        title: "Needs Attention",
-                        icon: "exclamationmark.circle.fill",
-                        iconColor: .red,
-                        reminders: needsAttentionReminders,
-                        showSnooze: true
-                    )
-                case .habits:
-                    MacHabitsView(habits: habitReminders)
-                case .all:
-                    MacReminderListView(
-                        title: "All Reminders",
-                        icon: "tray.full.fill",
-                        iconColor: .secondary,
-                        reminders: allReminders,
-                        showSnooze: false
-                    )
-                case .category(let category):
-                    MacReminderListView(
-                        title: category.name,
-                        icon: category.icon,
-                        iconColor: category.color,
-                        reminders: remindersForCategory(category),
-                        showSnooze: false
-                    )
-                case .none:
-                    ContentUnavailableView("Select a section", systemImage: "sidebar.left")
+            // MARK: Main Content
+            HSplitView {
+                // Reminder List
+                VStack(spacing: 0) {
+                    // Header
+                    HStack {
+                        Text(sidebarTitle)
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                            .foregroundStyle(sidebarColor)
+                        Spacer()
+                        Button { showingAddReminder = true } label: {
+                            Image(systemName: "plus")
+                                .font(.title2)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut("n", modifiers: .command)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+
+                    // Reminder List - same structure as iOS TodayView
+                    if selectedSidebarItem == .today {
+                        todayListView
+                    } else {
+                        standardListView
+                    }
+                }
+                .frame(minWidth: 400)
+                .background(AppColors.background)
+
+                // Detail Panel (only shows when reminder selected)
+                if let reminder = selectedReminder {
+                    MacReminderDetailPanel(reminder: reminder, onClose: { selectedReminder = nil })
+                        .frame(minWidth: 320, idealWidth: 380, maxWidth: 420)
+                        .transition(.move(edge: .trailing))
                 }
             }
-            .searchable(text: $searchText, prompt: "Search reminders")
         }
         .sheet(isPresented: $showingAddReminder) {
-            MacAddReminderView()
+            MacAddReminderSheet()
+        }
+        .sheet(isPresented: $showingSettings) {
+            MacSettingsSheet()
+        }
+    }
+
+    // MARK: - Today List View (matches iOS TodayView order)
+
+    private var todayListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 16) {
+                // Habits Section
+                if !habitReminders.isEmpty {
+                    MacSectionCard(title: "Habits", icon: "heart.circle.fill", color: .pink) {
+                        // Progress bar
+                        let completed = habitReminders.filter { $0.isCompletedToday }.count
+                        VStack(spacing: 8) {
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Color.pink.opacity(0.2))
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Color.pink)
+                                        .frame(width: geo.size.width * CGFloat(completed) / CGFloat(max(habitReminders.count, 1)))
+                                }
+                            }
+                            .frame(height: 6)
+
+                            ForEach(habitReminders) { habit in
+                                MacReminderRow(reminder: habit, isHabit: true, isSelected: selectedReminder?.id == habit.id) {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        selectedReminder = selectedReminder?.id == habit.id ? nil : habit
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Needs Attention Section
+                if !needsAttentionReminders.isEmpty {
+                    MacSectionCard(title: "Needs Attention", icon: "exclamationmark.circle.fill", color: .red) {
+                        ForEach(needsAttentionReminders) { reminder in
+                            MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id) {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Category Sections
+                ForEach(categoriesWithReminders) { category in
+                    let categoryReminders = remindersForCategory(category).filter { r in
+                        !needsAttentionReminders.contains { $0.id == r.id }
+                    }
+                    if !categoryReminders.isEmpty {
+                        MacSectionCard(title: category.name, icon: category.icon, color: category.color) {
+                            ForEach(categoryReminders) { reminder in
+                                MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id) {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+
+    // MARK: - Standard List View
+
+    private var standardListView: some View {
+        List(selection: $selectedReminder) {
+            ForEach(displayedReminders) { reminder in
+                MacReminderRow(reminder: reminder, isHabit: selectedSidebarItem == .habits, isSelected: selectedReminder?.id == reminder.id) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
+                    }
+                }
+                .tag(reminder)
+                .listRowSeparator(.visible)
+            }
+            .onDelete(perform: deleteReminders)
+        }
+        .listStyle(.plain)
+        .overlay {
+            if displayedReminders.isEmpty {
+                emptyStateView
+            }
+        }
+    }
+
+    private var displayedReminders: [Reminder] {
+        switch selectedSidebarItem {
+        case .today:
+            return needsAttentionReminders
+        case .scheduled:
+            return scheduledReminders
+        case .all:
+            return allActiveReminders
+        case .completed:
+            return completedReminders
+        case .habits:
+            return habitReminders
+        case .category(let cat):
+            return remindersForCategory(cat)
+        case .none:
+            return []
+        }
+    }
+
+    private var sidebarTitle: String {
+        switch selectedSidebarItem {
+        case .today: return "Today"
+        case .scheduled: return "Scheduled"
+        case .all: return "All"
+        case .completed: return "Completed"
+        case .habits: return "Habits"
+        case .category(let cat): return cat.name
+        case .none: return "Reminders"
+        }
+    }
+
+    private var sidebarColor: Color {
+        switch selectedSidebarItem {
+        case .today: return .blue
+        case .scheduled: return .red
+        case .all: return .gray
+        case .completed: return .gray
+        case .habits: return .pink
+        case .category(let cat): return cat.color
+        case .none: return .primary
+        }
+    }
+
+    // MARK: - Empty State
+
+    @ViewBuilder
+    private var emptyStateView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 48))
+                .foregroundStyle(.tertiary)
+            Text(emptyMessage)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyMessage: String {
+        switch selectedSidebarItem {
+        case .today: return "All caught up!"
+        case .scheduled: return "No scheduled reminders"
+        case .all: return "No reminders"
+        case .completed: return "No completed reminders"
+        case .habits: return "No habits yet"
+        case .category(let cat): return "No reminders in \(cat.name)"
+        case .none: return "Select a list"
+        }
+    }
+
+    private func deleteReminders(at offsets: IndexSet) {
+        for index in offsets {
+            modelContext.delete(displayedReminders[index])
         }
     }
 }
 
-// MARK: - Mac Reminder List View
+// MARK: - Smart List Card
 
-struct MacReminderListView: View {
-    let title: String
+struct SmartListCard: View {
     let icon: String
-    let iconColor: Color
-    let reminders: [Reminder]
-    let showSnooze: Bool
+    let color: Color
+    let title: String
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(iconColor)
-                    .font(.title2)
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.title2)
+                        .foregroundStyle(color)
+                    Spacer()
+                    Text("\(count)")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.primary)
+                }
                 Text(title)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer()
-                Text("\(reminders.count) items")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .padding()
-
-            Divider()
-
-            if reminders.isEmpty {
-                ContentUnavailableView("No Reminders", systemImage: icon)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(reminders) { reminder in
-                        MacReminderRow(reminder: reminder, showSnooze: showSnooze)
-                    }
-                }
-                .listStyle(.inset)
-            }
+            .padding(10)
+            .background(isSelected ? color.opacity(0.15) : AppColors.secondaryBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? color : .clear, lineWidth: 2)
+            )
         }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Mac Section Card
+
+struct MacSectionCard<Content: View>: View {
+    let title: String
+    let icon: String
+    let color: Color
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                Text(title)
+                    .font(.headline)
+            }
+
+            content
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
 // MARK: - Mac Reminder Row
 
 struct MacReminderRow: View {
-    @Environment(\.modelContext) private var modelContext
     @Bindable var reminder: Reminder
-    let showSnooze: Bool
+    let isHabit: Bool
+    let isSelected: Bool
+    let onTap: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
             // Checkbox
             Button {
-                withAnimation {
-                    if reminder.isCompleted {
-                        reminder.markIncomplete()
+                withAnimation(.spring(response: 0.3)) {
+                    if isHabit {
+                        reminder.isCompletedToday ? reminder.clearHabitCompletion() : reminder.markHabitDoneToday()
                     } else {
-                        reminder.markCompleted()
+                        reminder.isCompleted ? reminder.markIncomplete() : reminder.markCompleted()
                     }
                 }
             } label: {
-                Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
+                Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(reminder.isCompleted ? .green : .secondary)
+                    .foregroundStyle(isChecked ? .green : .secondary)
             }
             .buttonStyle(.plain)
 
             // Content
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(reminder.title)
-                    .strikethrough(reminder.isCompleted)
-                    .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
+                    .lineLimit(2)
+                    .strikethrough(isChecked)
+                    .foregroundStyle(isChecked ? .secondary : .primary)
 
                 HStack(spacing: 8) {
-                    if let category = reminder.category {
-                        Label(category.name, systemImage: category.icon)
+                    if let category = reminder.category, !isHabit {
+                        Text(category.name)
                             .font(.caption)
-                            .foregroundStyle(category.color)
+                            .foregroundStyle(.secondary)
                     }
 
-                    if let icon = reminder.priority.icon {
-                        Image(systemName: icon)
+                    if let dueDate = reminder.dueDate, !isHabit {
+                        Text(formatDate(dueDate))
                             .font(.caption)
-                            .foregroundStyle(reminder.priority.color)
+                            .foregroundStyle(dateColor(dueDate))
                     }
 
-                    if reminder.isDueToday {
-                        Text("Today")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    } else if reminder.isOverdue {
-                        Text("Overdue")
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                    if reminder.recurrence != .none {
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.trianglehead.2.clockwise")
+                            Text(reminder.recurrence.label)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                     }
                 }
             }
 
             Spacer()
-
-            // Snooze button
-            if showSnooze {
-                Button("Snooze") {
-                    let calendar = Calendar.current
-                    let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
-                    reminder.dueDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            // Delete
-            Button {
-                withAnimation {
-                    modelContext.delete(reminder)
-                }
-            } label: {
-                Image(systemName: "trash")
-                    .foregroundStyle(.red)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
+    }
+
+    private var isChecked: Bool {
+        isHabit ? reminder.isCompletedToday : reminder.isCompleted
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func dateColor(_ date: Date) -> Color {
+        if date < Date() { return .red }
+        if Calendar.current.isDateInToday(date) { return .orange }
+        return .secondary
     }
 }
 
-// MARK: - Mac Habits View
+// MARK: - Mac Reminder Detail Panel
 
-struct MacHabitsView: View {
-    let habits: [Reminder]
+struct MacReminderDetailPanel: View {
+    @Bindable var reminder: Reminder
+    let onClose: () -> Void
 
-    private var completedCount: Int {
-        habits.filter { $0.isCompletedToday }.count
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack {
-                Image(systemName: "heart.circle.fill")
-                    .foregroundStyle(.pink)
-                    .font(.title2)
-                Text("Daily Habits")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer()
-                Text("\(completedCount)/\(habits.count) completed")
-                    .foregroundStyle(.secondary)
-            }
-            .padding()
-
-            // Progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.pink.opacity(0.2))
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.pink)
-                        .frame(width: geo.size.width * CGFloat(completedCount) / CGFloat(max(habits.count, 1)))
-                        .animation(.spring, value: completedCount)
-                }
-            }
-            .frame(height: 8)
-            .padding(.horizontal)
-
-            Divider()
-                .padding(.top)
-
-            if habits.isEmpty {
-                ContentUnavailableView("No Habits", systemImage: "heart.circle")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(habits) { habit in
-                        MacHabitRow(habit: habit)
-                    }
-                }
-                .listStyle(.inset)
-            }
-        }
-    }
-}
-
-// MARK: - Mac Habit Row
-
-struct MacHabitRow: View {
-    @Bindable var habit: Reminder
-
-    var isCompletedToday: Bool {
-        habit.isCompletedToday
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Button {
-                withAnimation {
-                    if isCompletedToday {
-                        habit.clearHabitCompletion()
-                    } else {
-                        habit.markHabitDoneToday()
-                    }
-                }
-            } label: {
-                Image(systemName: isCompletedToday ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(isCompletedToday ? .green : .secondary)
-            }
-            .buttonStyle(.plain)
-
-            Text(habit.title)
-                .strikethrough(isCompletedToday)
-                .foregroundStyle(isCompletedToday ? .secondary : .primary)
-
-            Spacer()
-
-            if !habit.notes.isEmpty {
-                Text(habit.notes)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-// MARK: - Mac Add Reminder View
-
-struct MacAddReminderView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
-    @State private var title = ""
-    @State private var notes = ""
-    @State private var selectedCategory: Category?
-    @State private var priority: ReminderPriority = .none
-    @State private var hasDueDate = false
-    @State private var dueDate = Date()
+    @State private var showDeleteConfirmation = false
+    @State private var isEnhancing = false
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.escape)
+                Text("Details")
+                    .font(.headline)
                 Spacer()
-                Text("New Reminder")
-                    .fontWeight(.semibold)
-                Spacer()
-                Button("Add") { addReminder() }
-                    .keyboardShortcut(.return)
-                    .disabled(title.isEmpty)
+                Button { onClose() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.escape, modifiers: [])
             }
             .padding()
+            .background(AppColors.secondaryBackground)
 
             Divider()
 
-            Form {
-                TextField("Title", text: $title)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Notes", text: $notes, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(3...6)
-
-                Picker("Category", selection: $selectedCategory) {
-                    Text("None").tag(nil as Category?)
-                    ForEach(categories.filter { $0.name != "Habits" }) { category in
-                        Label(category.name, systemImage: category.icon)
-                            .tag(category as Category?)
+            // Content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Complete toggle
+                    Button {
+                        withAnimation { reminder.isCompleted ? reminder.markIncomplete() : reminder.markCompleted() }
+                    } label: {
+                        Label(
+                            reminder.isCompleted ? "Completed" : "Mark Complete",
+                            systemImage: reminder.isCompleted ? "checkmark.circle.fill" : "circle"
+                        )
+                        .foregroundStyle(reminder.isCompleted ? .green : .primary)
                     }
-                }
+                    .buttonStyle(.plain)
 
-                Picker("Priority", selection: $priority) {
-                    ForEach(ReminderPriority.allCases, id: \.self) { p in
-                        Text(p.label).tag(p)
+                    Divider()
+
+                    // Title
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Title").font(.caption).foregroundStyle(.secondary)
+                        TextField("Title", text: $reminder.title, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.body)
                     }
-                }
 
-                Toggle("Due Date", isOn: $hasDueDate)
+                    // Notes
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Notes").font(.caption).foregroundStyle(.secondary)
+                        TextField("Notes", text: $reminder.notes, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .lineLimit(3...6)
+                    }
 
-                if hasDueDate {
-                    DatePicker("Date", selection: $dueDate)
+                    Divider()
+
+                    // Category
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Category").font(.caption).foregroundStyle(.secondary)
+                        FlowLayout(spacing: 6) {
+                            ForEach(categories.filter { $0.name != "Habits" }) { category in
+                                CategoryPill(
+                                    category: category,
+                                    isSelected: reminder.category?.id == category.id,
+                                    action: { reminder.category = reminder.category?.id == category.id ? nil : category }
+                                )
+                            }
+                        }
+                    }
+
+                    // Due Date
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Due Date").font(.caption).foregroundStyle(.secondary)
+                        if let dueDate = reminder.dueDate {
+                            DatePicker("", selection: Binding(get: { dueDate }, set: { reminder.dueDate = $0 }))
+                                .labelsHidden()
+                            Button("Remove", role: .destructive) { reminder.dueDate = nil }
+                                .font(.caption)
+                        } else {
+                            Button("Add due date") {
+                                reminder.dueDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date.tomorrow)
+                            }
+                        }
+                    }
+
+                    // Priority
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Priority").font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            ForEach(ReminderPriority.allCases, id: \.self) { p in
+                                PriorityPill(priority: p, isSelected: reminder.priority == p) {
+                                    reminder.priority = p
+                                }
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    // Metadata
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Created: \(reminder.createdAt.formatted())")
+                        if let completed = reminder.completedAt {
+                            Text("Completed: \(completed.formatted())")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                    // Delete
+                    Button(role: .destructive) { showDeleteConfirmation = true } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .foregroundStyle(.red)
                 }
+                .padding()
             }
-            .padding()
         }
-        .frame(width: 400, height: 400)
+        .background(AppColors.background)
+        .confirmationDialog("Delete?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) { modelContext.delete(reminder); onClose() }
+        }
     }
+}
 
-    private func addReminder() {
-        let reminder = Reminder(
-            title: title,
-            notes: notes,
-            dueDate: hasDueDate ? dueDate : nil,
-            priority: priority,
-            category: selectedCategory
-        )
-        modelContext.insert(reminder)
-        dismiss()
+// MARK: - Supporting Views
+
+struct CategoryPill: View {
+    let category: Category
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: category.icon)
+                Text(category.name)
+            }
+            .font(.caption)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(isSelected ? category.color : category.color.opacity(0.15))
+            .foregroundStyle(isSelected ? .white : category.color)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct PriorityPill: View {
+    let priority: ReminderPriority
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                if let icon = priority.icon {
+                    Image(systemName: icon)
+                }
+                Text(priority.label)
+            }
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(isSelected ? (priority == .none ? .gray : priority.color) : AppColors.secondaryBackground)
+            .foregroundStyle(isSelected ? .white : (priority == .none ? .primary : priority.color))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Sheets
+
+struct MacAddReminderSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            AddReminderView()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                }
+        }
+        .frame(width: 480, height: 620)
+    }
+}
+
+struct MacSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            SettingsView()
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        .frame(width: 550, height: 700)
     }
 }
 

@@ -77,7 +77,7 @@ struct SettingsView: View {
                         migrateToiCloud()
                     } label: {
                         HStack {
-                            Label("Migrate Local Data to iCloud", systemImage: "arrow.up.icloud")
+                            Label("Migrate Local Data to iCloud", systemImage: "icloud.and.arrow.up")
                             Spacer()
                             if isMigrating {
                                 ProgressView()
@@ -149,7 +149,9 @@ struct SettingsView: View {
                         SecureField("Enter API Key", text: $apiKeyInput)
                             .textContentType(.password)
                             .autocorrectionDisabled()
+                            #if os(iOS)
                             .textInputAutocapitalization(.never)
+                            #endif
 
                         Button {
                             if !apiKeyInput.isEmpty {
@@ -254,6 +256,12 @@ struct SettingsView: View {
                     } label: {
                         Label("Delete All Reminders", systemImage: "trash.fill")
                     }
+
+                    Button {
+                        cleanDuplicateCategories()
+                    } label: {
+                        Label("Clean Duplicate Categories", systemImage: "sparkles")
+                    }
                 } header: {
                     Text("Data")
                 } footer: {
@@ -277,6 +285,9 @@ struct SettingsView: View {
                     }
                 }
             }
+            #if os(macOS)
+            .listStyle(.inset(alternatesRowBackgrounds: false))
+            #endif
             .navigationTitle("Settings")
             .alert("Sync Result", isPresented: $showingSyncAlert) {
                 Button("OK") {}
@@ -474,6 +485,37 @@ struct SettingsView: View {
         for reminder in reminders {
             modelContext.delete(reminder)
         }
+        try? modelContext.save()
+        HapticManager.notification(.success)
+    }
+
+    private func cleanDuplicateCategories() {
+        var seenNames: Set<String> = []
+        var duplicatesToDelete: [Category] = []
+
+        // Sort by sortOrder to keep the original ones
+        let sortedCategories = categories.sorted { $0.sortOrder < $1.sortOrder }
+
+        for category in sortedCategories {
+            if seenNames.contains(category.name) {
+                // This is a duplicate - mark for deletion
+                duplicatesToDelete.append(category)
+            } else {
+                seenNames.insert(category.name)
+            }
+        }
+
+        // Delete duplicates
+        for duplicate in duplicatesToDelete {
+            // Move reminders to the original category first
+            if let originalCategory = categories.first(where: { $0.name == duplicate.name && !duplicatesToDelete.contains($0) }) {
+                for reminder in reminders where reminder.category?.id == duplicate.id {
+                    reminder.category = originalCategory
+                }
+            }
+            modelContext.delete(duplicate)
+        }
+
         try? modelContext.save()
         HapticManager.notification(.success)
     }

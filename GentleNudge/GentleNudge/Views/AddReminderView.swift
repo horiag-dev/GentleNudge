@@ -214,7 +214,9 @@ struct AddReminderView: View {
             }
             .background(AppColors.background)
             .navigationTitle("New Reminder")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

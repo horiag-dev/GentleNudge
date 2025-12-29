@@ -208,7 +208,9 @@ struct EditCategoryView: View {
             }
             .background(AppColors.background)
             .navigationTitle(isNewCategory ? "New Category" : "Edit Category")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
