@@ -12,38 +12,31 @@ struct TodayView: View {
             .sorted { $0.title < $1.title }
     }
 
-    // Urgent: Items due today but NOT overdue yet
-    private var urgentReminders: [Reminder] {
+    // Urgent: Items due today, overdue, or high priority
+    private var needsAttentionReminders: [Reminder] {
         reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            guard reminder.dueDate != nil else { return false }
-            // Due today but not yet overdue (to avoid duplicates with overdueReminders)
-            return reminder.isDueToday && !reminder.isOverdue
+            // Include: overdue, due today, or high priority
+            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
         }
-        .sorted { $0.priority.rawValue > $1.priority.rawValue }
-    }
-
-    // Overdue (excluding habits)
-    private var overdueReminders: [Reminder] {
-        reminders.filter { $0.isOverdue && !$0.isCompleted && !$0.isHabit }
-            .sorted { $0.priority.rawValue > $1.priority.rawValue }
+        .sorted { r1, r2 in
+            // Overdue first, then due today, then high priority
+            if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
+            if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
+            return r1.priority.rawValue > r2.priority.rawValue
+        }
     }
 
     private func remindersForCategory(_ category: Category) -> [Reminder] {
-        reminders.filter {
-            $0.category?.id == category.id &&
-            !$0.isCompleted &&
-            !$0.isHabit
+        reminders.filter { reminder in
+            guard reminder.category?.id == category.id,
+                  !reminder.isCompleted,
+                  !reminder.isHabit else { return false }
+            // Exclude items already in Needs Attention
+            let inNeedsAttention = reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
+            return !inNeedsAttention
         }
-        .sorted { r1, r2 in
-            // Today items first, then by priority
-            let r1Today = r1.isDueToday || r1.isOverdue
-            let r2Today = r2.isDueToday || r2.isOverdue
-            if r1Today != r2Today {
-                return r1Today
-            }
-            return r1.priority.rawValue > r2.priority.rawValue
-        }
+        .sorted { $0.priority.rawValue > $1.priority.rawValue }
     }
 
     // Categories that have reminders (for jump bar)
@@ -94,18 +87,18 @@ struct TodayView: View {
                             HabitsSection(habits: habitReminders)
                         }
 
-                        // Urgent / Time-sensitive
-                        if !overdueReminders.isEmpty || !urgentReminders.isEmpty {
+                        // Urgent / Time-sensitive / High Priority
+                        if !needsAttentionReminders.isEmpty {
                             VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
                                 HStack(spacing: Constants.Spacing.xs) {
-                                    Image(systemName: "clock.badge.exclamationmark.fill")
+                                    Image(systemName: "exclamationmark.circle.fill")
                                         .foregroundStyle(.red)
                                     Text("Needs Attention")
                                         .font(.headline)
                                 }
 
                                 VStack(spacing: 4) {
-                                    ForEach(overdueReminders + urgentReminders) { reminder in
+                                    ForEach(needsAttentionReminders) { reminder in
                                         NeedsAttentionRow(reminder: reminder)
                                     }
                                 }
@@ -237,7 +230,7 @@ struct NeedsAttentionRow: View {
     @State private var showingDetail = false
 
     var body: some View {
-        HStack(spacing: Constants.Spacing.sm) {
+        HStack(alignment: .top, spacing: Constants.Spacing.xs) {
             // Completion toggle
             Button {
                 withAnimation(Constants.Animation.spring) {
@@ -249,49 +242,44 @@ struct NeedsAttentionRow: View {
                 }
             } label: {
                 Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
+                    .font(.body)
                     .foregroundStyle(reminder.isCompleted ? .green : .secondary)
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
+            .padding(.top, 2)
 
             // Title
             Text(reminder.title)
-                .font(.body)
+                .font(.subheadline)
                 .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
                 .strikethrough(reminder.isCompleted)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
                 .onTapGesture {
                     showingDetail = true
                 }
 
             Spacer()
 
-            // Due date
-            if let dueDate = reminder.dueDate {
-                Text(dueDate.formatted(date: .abbreviated, time: .omitted))
-                    .font(.caption)
-                    .foregroundStyle(reminder.isOverdue ? Color.red : Color.secondary)
-            }
-
-            // Tomorrow button
+            // Snooze button
             Button {
                 withAnimation(Constants.Animation.spring) {
                     HapticManager.impact(.light)
-                    postponeToTomorrow()
+                    snoozeToTomorrow()
                 }
             } label: {
-                Text("→")
-                    .font(.subheadline)
-                    .fontWeight(.bold)
+                Text("Snooze")
+                    .font(.caption2)
+                    .fontWeight(.medium)
                     .foregroundStyle(.white)
-                    .frame(width: 28, height: 28)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                     .background(Color.orange)
-                    .clipShape(Circle())
+                    .clipShape(Capsule())
             }
             .buttonStyle(.plain)
         }
-        .padding(.vertical, Constants.Spacing.xs)
+        .padding(.vertical, 6)
         .padding(.horizontal, Constants.Spacing.xs)
         .background(AppColors.background)
         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
@@ -300,7 +288,7 @@ struct NeedsAttentionRow: View {
         }
     }
 
-    private func postponeToTomorrow() {
+    private func snoozeToTomorrow() {
         let calendar = Calendar.current
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
         // Set to 9 AM tomorrow
