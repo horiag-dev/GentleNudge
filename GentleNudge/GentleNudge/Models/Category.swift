@@ -3,12 +3,12 @@ import SwiftData
 
 @Model
 final class Category: Identifiable {
-    var id: UUID
-    var name: String
-    var icon: String
-    var colorName: String
-    var isDefault: Bool
-    var sortOrder: Int
+    var id: UUID = UUID()
+    var name: String = ""
+    var icon: String = "folder.fill"
+    var colorName: String = "gray"
+    var isDefault: Bool = false
+    var sortOrder: Int = 0
 
     @Relationship(deleteRule: .nullify, inverse: \Reminder.category)
     var reminders: [Reminder]?

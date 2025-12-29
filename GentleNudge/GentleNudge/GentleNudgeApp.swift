@@ -8,10 +8,25 @@ struct GentleNudgeApp: App {
             Reminder.self,
             Category.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+
+        // Try CloudKit first, fall back to local storage if not configured
+        // Use explicit container identifier
+        let cloudKitConfig = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .private("iCloud.com.horiag.GentleNudge")
+        )
+
+        let localConfig = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .none
+        )
 
         do {
-            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            // Try CloudKit configuration first
+            let container = try ModelContainer(for: schema, configurations: [cloudKitConfig])
+            print("Using CloudKit sync")
 
             // Initialize default categories on first launch
             Task { @MainActor in
@@ -29,14 +44,49 @@ struct GentleNudgeApp: App {
 
             return container
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            // CloudKit failed, use local storage
+            print("CloudKit not available, using local storage: \(error)")
+            print("Full error details: \(String(describing: error))")
+            if let nsError = error as NSError? {
+                print("NSError domain: \(nsError.domain), code: \(nsError.code)")
+                print("NSError userInfo: \(nsError.userInfo)")
+            }
+            do {
+                let container = try ModelContainer(for: schema, configurations: [localConfig])
+
+                Task { @MainActor in
+                    let context = container.mainContext
+                    let descriptor = FetchDescriptor<Category>()
+                    let existingCategories = try? context.fetch(descriptor)
+
+                    if existingCategories?.isEmpty ?? true {
+                        for defaultCategory in Category.defaults {
+                            context.insert(defaultCategory)
+                        }
+                        try? context.save()
+                    }
+                }
+
+                return container
+            } catch {
+                fatalError("Could not create ModelContainer: \(error)")
+            }
         }
     }()
 
     var body: some Scene {
         WindowGroup {
+            #if os(macOS)
+            MacContentView()
+                .frame(minWidth: 800, minHeight: 500)
+            #else
             ContentView()
+            #endif
         }
         .modelContainer(sharedModelContainer)
+        #if os(macOS)
+        .windowStyle(.automatic)
+        .defaultSize(width: 1000, height: 700)
+        #endif
     }
 }

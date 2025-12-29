@@ -32,7 +32,7 @@ actor AppleRemindersService {
         case notDetermined
     }
 
-    func checkAuthorizationStatus() -> AuthorizationStatus {
+    nonisolated func checkAuthorizationStatus() -> AuthorizationStatus {
         switch EKEventStore.authorizationStatus(for: .reminder) {
         case .fullAccess, .authorized:
             return .authorized
@@ -46,7 +46,7 @@ actor AppleRemindersService {
     }
 
     func requestAccess() async throws -> Bool {
-        if #available(iOS 17.0, *) {
+        if #available(iOS 17.0, macOS 14.0, *) {
             return try await eventStore.requestFullAccessToReminders()
         } else {
             return try await eventStore.requestAccess(to: .reminder)

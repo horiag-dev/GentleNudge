@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 // MARK: - View Extensions
 
@@ -160,7 +163,11 @@ struct LinkedText: View {
 
     private var attributedString: AttributedString {
         var attributedString = AttributedString(text)
+        #if os(iOS)
         attributedString.foregroundColor = UIColor(foregroundStyle)
+        #else
+        attributedString.foregroundColor = NSColor(foregroundStyle)
+        #endif
 
         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
         let matches = detector?.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)) ?? []
@@ -181,6 +188,9 @@ struct LinkedText: View {
 
 // MARK: - Haptics
 
+#if os(iOS)
+import UIKit
+
 enum HapticManager {
     static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         let generator = UIImpactFeedbackGenerator(style: style)
@@ -197,3 +207,14 @@ enum HapticManager {
         generator.selectionChanged()
     }
 }
+#else
+// macOS stub - no haptics
+enum HapticManager {
+    enum FeedbackStyle { case light, medium, heavy, rigid, soft }
+    enum FeedbackType { case success, warning, error }
+
+    static func impact(_ style: FeedbackStyle) {}
+    static func notification(_ type: FeedbackType) {}
+    static func selection() {}
+}
+#endif

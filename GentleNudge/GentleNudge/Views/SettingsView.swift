@@ -19,6 +19,9 @@ struct SettingsView: View {
     @State private var exportDocument: BackupDocument?
     @State private var backupList: [(date: Date, url: URL, size: Int64)] = []
     @State private var showingDeleteAllConfirmation = false
+    @State private var isMigrating = false
+    @State private var migrationMessage = ""
+    @State private var showingMigrationAlert = false
 
     enum SyncStatus {
         case idle
@@ -47,6 +50,45 @@ struct SettingsView: View {
                     Text("Import")
                 } footer: {
                     Text("Import reminders due today from Apple Reminders. AI will analyze and categorize them automatically.")
+                }
+
+                // iCloud Sync
+                Section {
+                    HStack {
+                        Label("iCloud Status", systemImage: "icloud.fill")
+                        Spacer()
+                        if FileManager.default.ubiquityIdentityToken != nil {
+                            Text("Connected")
+                                .foregroundStyle(.green)
+                        } else {
+                            Text("Not signed in")
+                                .foregroundStyle(.red)
+                        }
+                    }
+
+                    HStack {
+                        Text("Reminders in database")
+                        Spacer()
+                        Text("\(reminders.count)")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        migrateToiCloud()
+                    } label: {
+                        HStack {
+                            Label("Migrate Local Data to iCloud", systemImage: "arrow.up.icloud")
+                            Spacer()
+                            if isMigrating {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isMigrating)
+                } header: {
+                    Text("iCloud")
+                } footer: {
+                    Text("Both devices must be signed into the same iCloud account. Check: Settings → Apple ID (iOS) or System Settings → Apple ID (Mac).")
                 }
 
                 // Apple Reminders Sync
@@ -265,6 +307,11 @@ struct SettingsView: View {
             .sheet(isPresented: $showingImport) {
                 ImportRemindersView()
             }
+            .alert("Migration Result", isPresented: $showingMigrationAlert) {
+                Button("OK") {}
+            } message: {
+                Text(migrationMessage)
+            }
             .fileExporter(
                 isPresented: $showingExporter,
                 document: exportDocument,
@@ -429,6 +476,101 @@ struct SettingsView: View {
         }
         try? modelContext.save()
         HapticManager.notification(.success)
+    }
+
+    private func migrateToiCloud() {
+        isMigrating = true
+
+        Task {
+            do {
+                // Create a container pointing to local-only database
+                let schema = Schema([Reminder.self, Category.self])
+                let localConfig = ModelConfiguration(
+                    schema: schema,
+                    isStoredInMemoryOnly: false,
+                    cloudKitDatabase: .none
+                )
+
+                let localContainer = try ModelContainer(for: schema, configurations: [localConfig])
+                let localContext = ModelContext(localContainer)
+
+                // Fetch from local database
+                let localReminders = try localContext.fetch(FetchDescriptor<Reminder>())
+                let localCategories = try localContext.fetch(FetchDescriptor<Category>())
+
+                guard !localReminders.isEmpty else {
+                    await MainActor.run {
+                        isMigrating = false
+                        migrationMessage = "No local reminders found to migrate."
+                        showingMigrationAlert = true
+                    }
+                    return
+                }
+
+                await MainActor.run {
+                    // Build category mapping (local name -> current category)
+                    var categoryMap: [String: Category] = [:]
+                    for category in categories {
+                        categoryMap[category.name] = category
+                    }
+
+                    // Create any missing categories
+                    for localCat in localCategories {
+                        if categoryMap[localCat.name] == nil {
+                            let newCat = Category(
+                                name: localCat.name,
+                                icon: localCat.icon,
+                                colorName: localCat.colorName,
+                                sortOrder: localCat.sortOrder
+                            )
+                            modelContext.insert(newCat)
+                            categoryMap[localCat.name] = newCat
+                        }
+                    }
+
+                    // Copy reminders
+                    var copiedCount = 0
+                    for localReminder in localReminders {
+                        // Check if already exists (by title + created date)
+                        let exists = reminders.contains { existing in
+                            existing.title == localReminder.title &&
+                            existing.createdAt.timeIntervalSince(localReminder.createdAt) < 1
+                        }
+
+                        if !exists {
+                            let newReminder = Reminder(
+                                title: localReminder.title,
+                                notes: localReminder.notes,
+                                dueDate: localReminder.dueDate,
+                                priority: localReminder.priority,
+                                category: categoryMap[localReminder.category?.name ?? ""],
+                                recurrence: localReminder.recurrence
+                            )
+                            newReminder.isCompleted = localReminder.isCompleted
+                            newReminder.completedAt = localReminder.completedAt
+                            newReminder.aiEnhancedDescription = localReminder.aiEnhancedDescription
+
+                            modelContext.insert(newReminder)
+                            copiedCount += 1
+                        }
+                    }
+
+                    try? modelContext.save()
+
+                    isMigrating = false
+                    migrationMessage = "Migrated \(copiedCount) reminders to iCloud. They will sync to your other devices."
+                    showingMigrationAlert = true
+                    HapticManager.notification(.success)
+                }
+            } catch {
+                await MainActor.run {
+                    isMigrating = false
+                    migrationMessage = "Migration failed: \(error.localizedDescription)"
+                    showingMigrationAlert = true
+                    HapticManager.notification(.error)
+                }
+            }
+        }
     }
 
     private func generateTestReminders() {

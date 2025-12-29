@@ -3,6 +3,10 @@
 <plist version="1.0">
 <dict>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string></string>
+	<string>Access to import and sync with Apple Reminders</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

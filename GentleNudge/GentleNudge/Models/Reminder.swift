@@ -86,17 +86,17 @@ enum ReminderPriority: Int, Codable, CaseIterable {
 
 @Model
 final class Reminder {
-    var id: UUID
-    var title: String
-    var notes: String
+    var id: UUID = UUID()
+    var title: String = ""
+    var notes: String = ""
     var dueDate: Date?
-    var priorityRaw: Int
-    var isCompleted: Bool
-    var createdAt: Date
+    var priorityRaw: Int = 0
+    var isCompleted: Bool = false
+    var createdAt: Date = Date()
     var completedAt: Date?
     var aiEnhancedDescription: String?
     var appleSyncID: String?
-    var hasBeenSynced: Bool
+    var hasBeenSynced: Bool = false
     var recurrenceRaw: Int = 0
 
     var category: Category?
