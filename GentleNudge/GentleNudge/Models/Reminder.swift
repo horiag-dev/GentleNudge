@@ -7,6 +7,7 @@ enum RecurrenceType: Int, Codable, CaseIterable {
     case weekly = 2
     case biweekly = 3
     case monthly = 4
+    case quarterly = 6  // 3 months
     case yearly = 5
 
     var label: String {
@@ -16,6 +17,7 @@ enum RecurrenceType: Int, Codable, CaseIterable {
         case .weekly: return "Weekly"
         case .biweekly: return "Every 2 Weeks"
         case .monthly: return "Monthly"
+        case .quarterly: return "Every 3 Months"
         case .yearly: return "Yearly"
         }
     }
@@ -27,6 +29,7 @@ enum RecurrenceType: Int, Codable, CaseIterable {
         case .weekly: return "calendar.badge.clock"
         case .biweekly: return "calendar.badge.plus"
         case .monthly: return "calendar"
+        case .quarterly: return "calendar.badge.exclamationmark"
         case .yearly: return "calendar.circle"
         }
     }
@@ -44,6 +47,8 @@ enum RecurrenceType: Int, Codable, CaseIterable {
             return calendar.date(byAdding: .weekOfYear, value: 2, to: date)
         case .monthly:
             return calendar.date(byAdding: .month, value: 1, to: date)
+        case .quarterly:
+            return calendar.date(byAdding: .month, value: 3, to: date)
         case .yearly:
             return calendar.date(byAdding: .year, value: 1, to: date)
         }

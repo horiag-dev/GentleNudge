@@ -19,6 +19,7 @@ struct MacContentView: View {
         case today
         case scheduled
         case all
+        case recurring
         case completed
         case habits
         case category(Category)
@@ -50,6 +51,17 @@ struct MacContentView: View {
 
     private var allActiveReminders: [Reminder] {
         reminders.filter { !$0.isCompleted && !$0.isHabit }
+    }
+
+    private var recurringReminders: [Reminder] {
+        reminders.filter { $0.isRecurring && !$0.isCompleted }
+            .sorted { r1, r2 in
+                // Sort by recurrence frequency (daily first) then by next due date
+                if r1.recurrence.rawValue != r2.recurrence.rawValue {
+                    return r1.recurrence.rawValue < r2.recurrence.rawValue
+                }
+                return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
+            }
     }
 
     private var completedReminders: [Reminder] {
@@ -111,6 +123,14 @@ struct MacContentView: View {
                         count: allActiveReminders.count,
                         isSelected: selectedSidebarItem == .all
                     ) { selectedSidebarItem = .all }
+
+                    SmartListCard(
+                        icon: "arrow.trianglehead.2.clockwise.rotate.90.circle.fill",
+                        color: .orange,
+                        title: "Recurring",
+                        count: recurringReminders.count,
+                        isSelected: selectedSidebarItem == .recurring
+                    ) { selectedSidebarItem = .recurring }
 
                     SmartListCard(
                         icon: "heart.circle.fill",
@@ -326,6 +346,8 @@ struct MacContentView: View {
             return scheduledReminders
         case .all:
             return allActiveReminders
+        case .recurring:
+            return recurringReminders
         case .completed:
             return completedReminders
         case .habits:
@@ -342,6 +364,7 @@ struct MacContentView: View {
         case .today: return "Today"
         case .scheduled: return "Scheduled"
         case .all: return "All"
+        case .recurring: return "Recurring"
         case .completed: return "Completed"
         case .habits: return "Habits"
         case .category(let cat): return cat.name
@@ -354,6 +377,7 @@ struct MacContentView: View {
         case .today: return .blue
         case .scheduled: return .red
         case .all: return .gray
+        case .recurring: return .orange
         case .completed: return .gray
         case .habits: return .pink
         case .category(let cat): return cat.color
@@ -380,6 +404,7 @@ struct MacContentView: View {
         case .today: return "All caught up!"
         case .scheduled: return "No scheduled reminders"
         case .all: return "No reminders"
+        case .recurring: return "No recurring reminders"
         case .completed: return "No completed reminders"
         case .habits: return "No habits yet"
         case .category(let cat): return "No reminders in \(cat.name)"
