@@ -4,20 +4,26 @@ import SwiftData
 enum RecurrenceType: Int, Codable, CaseIterable {
     case none = 0
     case daily = 1
+    case weekdays = 7      // Mon-Fri
+    case weekends = 8      // Sat-Sun
     case weekly = 2
     case biweekly = 3
     case monthly = 4
-    case quarterly = 6  // 3 months
+    case quarterly = 6     // 3 months
+    case semiannually = 9  // 6 months
     case yearly = 5
 
     var label: String {
         switch self {
         case .none: return "None"
         case .daily: return "Daily"
+        case .weekdays: return "Weekdays"
+        case .weekends: return "Weekends"
         case .weekly: return "Weekly"
         case .biweekly: return "Every 2 Weeks"
         case .monthly: return "Monthly"
         case .quarterly: return "Every 3 Months"
+        case .semiannually: return "Every 6 Months"
         case .yearly: return "Yearly"
         }
     }
@@ -26,10 +32,13 @@ enum RecurrenceType: Int, Codable, CaseIterable {
         switch self {
         case .none: return "arrow.forward"
         case .daily: return "sun.max.fill"
+        case .weekdays: return "briefcase.fill"
+        case .weekends: return "figure.walk"
         case .weekly: return "calendar.badge.clock"
         case .biweekly: return "calendar.badge.plus"
         case .monthly: return "calendar"
         case .quarterly: return "calendar.badge.exclamationmark"
+        case .semiannually: return "6.circle"
         case .yearly: return "calendar.circle"
         }
     }
@@ -41,6 +50,20 @@ enum RecurrenceType: Int, Codable, CaseIterable {
             return nil
         case .daily:
             return calendar.date(byAdding: .day, value: 1, to: date)
+        case .weekdays:
+            // Find next weekday (Mon-Fri)
+            var nextDate = calendar.date(byAdding: .day, value: 1, to: date)!
+            while calendar.isDateInWeekend(nextDate) {
+                nextDate = calendar.date(byAdding: .day, value: 1, to: nextDate)!
+            }
+            return nextDate
+        case .weekends:
+            // Find next weekend day (Sat or Sun)
+            var nextDate = calendar.date(byAdding: .day, value: 1, to: date)!
+            while !calendar.isDateInWeekend(nextDate) {
+                nextDate = calendar.date(byAdding: .day, value: 1, to: nextDate)!
+            }
+            return nextDate
         case .weekly:
             return calendar.date(byAdding: .weekOfYear, value: 1, to: date)
         case .biweekly:
@@ -49,6 +72,8 @@ enum RecurrenceType: Int, Codable, CaseIterable {
             return calendar.date(byAdding: .month, value: 1, to: date)
         case .quarterly:
             return calendar.date(byAdding: .month, value: 3, to: date)
+        case .semiannually:
+            return calendar.date(byAdding: .month, value: 6, to: date)
         case .yearly:
             return calendar.date(byAdding: .year, value: 1, to: date)
         }
