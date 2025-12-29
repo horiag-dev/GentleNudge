@@ -97,7 +97,7 @@ struct TodayView: View {
                                         .font(.headline)
                                 }
 
-                                VStack(spacing: 4) {
+                                VStack(spacing: Constants.Spacing.xs) {
                                     ForEach(needsAttentionReminders) { reminder in
                                         NeedsAttentionRow(reminder: reminder)
                                     }
@@ -106,7 +106,7 @@ struct TodayView: View {
                             .padding(Constants.Spacing.md)
                             .background(
                                 RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                                    .fill(Color.red.opacity(0.10))
+                                    .fill(Color.red.opacity(0.08))
                             )
                         }
 
@@ -281,8 +281,8 @@ struct NeedsAttentionRow: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, Constants.Spacing.xs)
+        .padding(.vertical, 10)
+        .padding(.horizontal, Constants.Spacing.sm)
         .background(AppColors.background)
         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
         .sheet(isPresented: $showingDetail) {

@@ -309,10 +309,16 @@ struct SettingsView: View {
                     } label: {
                         Label("Clean Duplicate Categories", systemImage: "sparkles")
                     }
+
+                    Button {
+                        updateCategoryColors()
+                    } label: {
+                        Label("Update Category Colors", systemImage: "paintpalette")
+                    }
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Export saves a JSON file you can share or save externally.")
+                    Text("Update Category Colors applies the latest color scheme (House=green, Today=yellow, etc.)")
                 }
 
                 // About
@@ -561,6 +567,44 @@ struct SettingsView: View {
                 }
             }
             modelContext.delete(duplicate)
+        }
+
+        try? modelContext.save()
+        HapticManager.notification(.success)
+    }
+
+    private func updateCategoryColors() {
+        // Updated color scheme
+        let colorUpdates: [String: (color: String, icon: String)] = [
+            "Habits": ("red", "heart.circle.fill"),
+            "Today": ("yellow", "sun.max.fill"),
+            "House": ("green", "house.fill"),
+            "Photos": ("purple", "photo.fill"),
+            "Finance": ("teal", "dollarsign.circle.fill"),
+            "To Read": ("blue", "book.fill"),
+            "Startup": ("orange", "lightbulb.fill"),
+            "Explore": ("indigo", "safari.fill"),
+            "GenAI": ("pink", "sparkles"),
+            "Misc": ("mint", "tray.fill"),
+        ]
+
+        for category in categories {
+            if let update = colorUpdates[category.name] {
+                category.colorName = update.color
+                category.icon = update.icon
+            }
+        }
+
+        // Add "Today" category if it doesn't exist
+        if !categories.contains(where: { $0.name == "Today" }) {
+            let todayCategory = Category(
+                name: "Today",
+                icon: "sun.max.fill",
+                colorName: "yellow",
+                isDefault: true,
+                sortOrder: 1
+            )
+            modelContext.insert(todayCategory)
         }
 
         try? modelContext.save()
