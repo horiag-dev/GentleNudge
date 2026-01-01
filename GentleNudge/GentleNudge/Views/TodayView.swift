@@ -187,9 +187,33 @@ struct HabitsSection: View {
 
 struct HabitRow: View {
     @Bindable var habit: Reminder
+    @State private var showingHeatmap = false
 
     var isCompletedToday: Bool {
         habit.isCompletedToday
+    }
+
+    private var currentStreak: Int {
+        let calendar = Calendar.current
+        var streak = 0
+        var checkDate = calendar.startOfDay(for: Date())
+
+        if !habit.wasCompletedOn(date: checkDate) {
+            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: checkDate) else {
+                return 0
+            }
+            checkDate = yesterday
+        }
+
+        while habit.wasCompletedOn(date: checkDate) {
+            streak += 1
+            guard let previousDay = calendar.date(byAdding: .day, value: -1, to: checkDate) else {
+                break
+            }
+            checkDate = previousDay
+        }
+
+        return streak
     }
 
     var body: some View {
@@ -217,11 +241,72 @@ struct HabitRow: View {
                 .strikethrough(isCompletedToday)
 
             Spacer()
+
+            // Streak indicator
+            if currentStreak > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "flame.fill")
+                        .font(.caption2)
+                    Text("\(currentStreak)")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                }
+                .foregroundStyle(.orange)
+            }
+
+            // Mini heatmap (last 14 days)
+            HabitMiniHeatmap(habit: habit, days: 14)
         }
         .padding(.vertical, Constants.Spacing.xs)
         .padding(.horizontal, Constants.Spacing.xs)
         .background(AppColors.background.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            showingHeatmap = true
+        }
+        .sheet(isPresented: $showingHeatmap) {
+            HabitDetailSheet(habit: habit)
+        }
+    }
+}
+
+struct HabitDetailSheet: View {
+    let habit: Reminder
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: Constants.Spacing.lg) {
+                    HabitHeatmapView(habit: habit, weeks: 16)
+
+                    // Stats
+                    VStack(spacing: Constants.Spacing.sm) {
+                        StatRow(title: "Last 7 days", value: "\(habit.completionCount(days: 7))/7")
+                        StatRow(title: "Last 30 days", value: "\(habit.completionCount(days: 30))/30")
+                        StatRow(title: "Total completions", value: "\(habit.habitCompletionDates.count)")
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
+                            .fill(Color.secondary.opacity(0.1))
+                    )
+                }
+                .padding()
+            }
+            .background(AppColors.background)
+            .navigationTitle(habit.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

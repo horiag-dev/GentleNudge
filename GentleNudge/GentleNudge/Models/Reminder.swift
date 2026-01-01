@@ -131,6 +131,9 @@ final class Reminder {
 
     var category: Category?
 
+    // Habit completion history - stores dates when habit was completed
+    var habitCompletionDates: [Date] = []
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -220,12 +223,34 @@ final class Reminder {
     /// For habits: just set completedAt without marking permanently complete
     /// The habit resets at midnight since isCompletedToday checks the date
     func markHabitDoneToday() {
+        let today = Calendar.current.startOfDay(for: Date())
         completedAt = Date()
+
+        // Add to history if not already completed today
+        if !habitCompletionDates.contains(where: { Calendar.current.isDate($0, inSameDayAs: today) }) {
+            habitCompletionDates.append(today)
+        }
     }
 
     /// For habits: clear today's completion
     func clearHabitCompletion() {
         completedAt = nil
+
+        // Remove today from history
+        let today = Calendar.current.startOfDay(for: Date())
+        habitCompletionDates.removeAll { Calendar.current.isDate($0, inSameDayAs: today) }
+    }
+
+    /// Check if habit was completed on a specific date
+    func wasCompletedOn(date: Date) -> Bool {
+        habitCompletionDates.contains { Calendar.current.isDate($0, inSameDayAs: date) }
+    }
+
+    /// Get completion count for the last N days
+    func completionCount(days: Int) -> Int {
+        let calendar = Calendar.current
+        let startDate = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date()))!
+        return habitCompletionDates.filter { $0 >= startDate }.count
     }
 
     /// For recurring reminders, creates the next occurrence and resets this one

@@ -25,6 +25,12 @@ struct SettingsView: View {
     @State private var iCloudSyncStatus: SyncStatus = .idle
     @State private var lastSyncTime: Date?
 
+    // Notification settings
+    @State private var notificationsEnabled = NotificationService.shared.isEnabled
+    @State private var notificationTime = NotificationService.shared.notificationTime
+    @State private var notificationPermissionStatus: String = "Checking..."
+    @State private var isTestingNotification = false
+
     enum SyncStatus {
         case idle
         case syncing
@@ -52,6 +58,65 @@ struct SettingsView: View {
                     Text("Import")
                 } footer: {
                     Text("Import reminders due today from Apple Reminders. AI will analyze and categorize them automatically.")
+                }
+
+                // Morning Notification
+                Section {
+                    Toggle(isOn: $notificationsEnabled) {
+                        Label("Morning Summary", systemImage: "bell.badge.fill")
+                    }
+                    .onChange(of: notificationsEnabled) { _, newValue in
+                        Task {
+                            if newValue {
+                                let granted = await NotificationService.shared.requestPermission()
+                                if granted {
+                                    NotificationService.shared.isEnabled = true
+                                    updateNotificationContent()
+                                } else {
+                                    notificationsEnabled = false
+                                }
+                            } else {
+                                NotificationService.shared.isEnabled = false
+                            }
+                            await checkNotificationPermission()
+                        }
+                    }
+
+                    if notificationsEnabled {
+                        DatePicker(
+                            "Time",
+                            selection: $notificationTime,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .onChange(of: notificationTime) { _, newValue in
+                            NotificationService.shared.notificationTime = newValue
+                            updateNotificationContent()
+                        }
+                    }
+
+                    HStack {
+                        Text("Permission")
+                        Spacer()
+                        Text(notificationPermissionStatus)
+                            .foregroundStyle(notificationPermissionStatus == "Authorized" ? .green : .orange)
+                    }
+
+                    Button {
+                        testNotification()
+                    } label: {
+                        HStack {
+                            Label("Test Notification", systemImage: "bell.and.waves.left.and.right")
+                            Spacer()
+                            if isTestingNotification {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isTestingNotification)
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("Get a morning reminder of items that need attention. The notification shows overdue items, items due today, and high priority tasks.")
                 }
 
                 // iCloud Sync
@@ -391,6 +456,9 @@ struct SettingsView: View {
             }
             .onAppear {
                 loadBackupList()
+                Task {
+                    await checkNotificationPermission()
+                }
             }
         }
     }
@@ -776,19 +844,119 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Notification Functions
+
+    private func checkNotificationPermission() async {
+        let status = await NotificationService.shared.checkPermissionStatus()
+        await MainActor.run {
+            switch status {
+            case .authorized:
+                notificationPermissionStatus = "Authorized"
+            case .denied:
+                notificationPermissionStatus = "Denied"
+            case .notDetermined:
+                notificationPermissionStatus = "Not Set"
+            case .provisional:
+                notificationPermissionStatus = "Provisional"
+            case .ephemeral:
+                notificationPermissionStatus = "Ephemeral"
+            @unknown default:
+                notificationPermissionStatus = "Unknown"
+            }
+        }
+    }
+
+    private func testNotification() {
+        isTestingNotification = true
+
+        // Calculate needs attention items
+        let needsAttention = reminders.filter { reminder in
+            guard !reminder.isHabit, !reminder.isCompleted else { return false }
+            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
+        }
+
+        // Get top item titles
+        let topItems = needsAttention.prefix(3).map { $0.title }
+
+        Task {
+            await NotificationService.shared.triggerTestNotification(
+                needsAttentionCount: needsAttention.count,
+                topItems: Array(topItems)
+            )
+
+            await MainActor.run {
+                isTestingNotification = false
+                HapticManager.notification(.success)
+            }
+        }
+    }
+
+    private func updateNotificationContent() {
+        // Calculate needs attention items
+        let needsAttention = reminders.filter { reminder in
+            guard !reminder.isHabit, !reminder.isCompleted else { return false }
+            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
+        }
+
+        // Get top item titles
+        let topItems = needsAttention.prefix(3).map { $0.title }
+
+        NotificationService.shared.updateScheduledNotificationContent(
+            needsAttentionCount: needsAttention.count,
+            topItems: Array(topItems)
+        )
+    }
+
     private func generateTestReminders() {
         let calendar = Calendar.current
 
-        // Test data for each category
+        // Habit data with completion rate (0.0 to 1.0 - how often they complete it)
+        let habitData: [(title: String, notes: String, completionRate: Double)] = [
+            ("Exercise", "30 min workout", 0.7),
+            ("Drink water", "8 glasses", 0.9),
+            ("Read", "At least 20 pages", 0.5),
+            ("Meditate", "10 min session", 0.4),
+            ("Journal", "Reflect on the day", 0.6),
+        ]
+
+        // Create habits with history
+        if let habitsCategory = categories.first(where: { $0.name == "Habits" }) {
+            for data in habitData {
+                let habit = Reminder(
+                    title: data.title,
+                    notes: data.notes,
+                    dueDate: nil,
+                    priority: .none,
+                    category: habitsCategory,
+                    recurrence: .daily
+                )
+
+                // Generate completion history for last 90 days
+                for daysAgo in 0..<90 {
+                    if Double.random(in: 0...1) < data.completionRate {
+                        if let date = calendar.date(byAdding: .day, value: -daysAgo, to: calendar.startOfDay(for: Date())) {
+                            habit.habitCompletionDates.append(date)
+                        }
+                    }
+                }
+
+                // Mark today as completed based on rate
+                if Double.random(in: 0...1) < data.completionRate {
+                    habit.completedAt = Date()
+                }
+
+                modelContext.insert(habit)
+            }
+        }
+
+        // Test data for other categories
         // Most items don't have due dates - this is a "keep track" app, not urgent todos
         // nil daysOffset means no due date
         let testData: [(categoryName: String, reminders: [(title: String, notes: String, daysOffset: Int?, priority: ReminderPriority, recurrence: RecurrenceType)])] = [
-            ("Habits", [
-                ("Exercise", "30 min workout", 0, .none, .daily),
-                ("Drink water", "8 glasses", 0, .none, .daily),
-                ("Read", "At least 20 pages", 0, .none, .daily),
-                ("Meditate", "10 min session", 0, .none, .daily),
-                ("Journal", "Reflect on the day", 0, .none, .daily),
+            ("Today", [
+                ("Call dentist", "Schedule cleaning", 0, .medium, .none),
+                ("Submit expense report", "From last trip", 0, .high, .none),
+                ("Pick up dry cleaning", "Before 6pm", 0, .low, .none),
             ]),
             ("To Read", [
                 ("Atomic Habits", "Finish chapter 5", nil, .none, .none),
@@ -805,7 +973,7 @@ struct SettingsView: View {
             ]),
             ("Finance", [
                 ("Review subscriptions", "Cancel unused ones", nil, .none, .none),
-                ("Tax documents", "Gather for accountant", nil, .none, .none),
+                ("Tax documents", "Gather for accountant", 7, .high, .none),
                 ("Rebalance portfolio", "Check allocation", nil, .none, .none),
             ]),
             ("House", [
