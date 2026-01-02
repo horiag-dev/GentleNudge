@@ -11,6 +11,16 @@ class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     ) {
         completionHandler([.banner, .sound, .badge])
     }
+
+    // Handle notification tap - opens the app
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        // App opens automatically, just complete
+        completionHandler()
+    }
 }
 
 @MainActor
@@ -167,22 +177,20 @@ class NotificationService {
         content.sound = .default
         content.interruptionLevel = .timeSensitive
 
-        // Build title
         if needsAttentionCount == 0 {
-            content.title = "All Clear!"
-            content.body = "No urgent items today."
+            content.title = "Good morning!"
+            content.body = "Nothing on your plate today. Enjoy!"
         } else {
-            content.title = "\(needsAttentionCount) item\(needsAttentionCount == 1 ? "" : "s") need\(needsAttentionCount == 1 ? "s" : "") attention"
+            content.title = "Good morning! \(needsAttentionCount) item\(needsAttentionCount == 1 ? "" : "s") today"
 
-            // Build body with top items
+            // Bullet list format
             if !topItems.isEmpty {
-                content.body = topItems.prefix(3).joined(separator: ", ")
+                let bulletList = topItems.prefix(5).map { "• \($0)" }.joined(separator: "\n")
+                content.body = bulletList
             }
         }
 
-        // Set badge to needs attention count
         content.badge = NSNumber(value: needsAttentionCount)
-
         return content
     }
 

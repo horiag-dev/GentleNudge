@@ -7,6 +7,10 @@ struct ReminderRow: View {
 
     @State private var isPressed = false
 
+    private var isMuted: Bool {
+        reminder.isDistantRecurring
+    }
+
     var body: some View {
         NavigationLink {
             ReminderDetailView(reminder: reminder)
@@ -35,7 +39,7 @@ struct ReminderRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(reminder.title)
                         .font(.subheadline)
-                        .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
+                        .foregroundStyle(reminder.isCompleted || isMuted ? .secondary : .primary)
                         .strikethrough(reminder.isCompleted)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -55,6 +59,15 @@ struct ReminderRow: View {
                             Text("Overdue")
                                 .font(.caption2)
                                 .foregroundStyle(.red)
+                        } else if isMuted, let dueText = reminder.daysUntilDueText {
+                            // Show "in X days" for distant recurring
+                            HStack(spacing: 2) {
+                                Image(systemName: "repeat")
+                                    .font(.system(size: 8))
+                                Text(dueText)
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                         }
                     }
                 }
@@ -68,6 +81,7 @@ struct ReminderRow: View {
             }
             .padding(.vertical, 6)
             .padding(.horizontal, Constants.Spacing.xs)
+            .opacity(isMuted ? 0.6 : 1.0)
         }
         .buttonStyle(.plain)
         .contextMenu {

@@ -196,6 +196,31 @@ final class Reminder {
         return Calendar.current.isDateInTomorrow(dueDate)
     }
 
+    /// Days until due (negative if overdue, nil if no due date)
+    var daysUntilDue: Int? {
+        guard let dueDate = dueDate else { return nil }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let due = calendar.startOfDay(for: dueDate)
+        return calendar.dateComponents([.day], from: today, to: due).day
+    }
+
+    /// Returns true if this is a recurring item not due within the next few days
+    var isDistantRecurring: Bool {
+        guard isRecurring, let days = daysUntilDue else { return false }
+        return days > 3
+    }
+
+    /// Human-readable "in X days" or "X days ago" string
+    var daysUntilDueText: String? {
+        guard let days = daysUntilDue else { return nil }
+        if days == 0 { return "Today" }
+        if days == 1 { return "Tomorrow" }
+        if days == -1 { return "Yesterday" }
+        if days > 1 { return "in \(days) days" }
+        return "\(-days) days ago"
+    }
+
     var formattedDueDate: String? {
         guard let dueDate = dueDate else { return nil }
 
