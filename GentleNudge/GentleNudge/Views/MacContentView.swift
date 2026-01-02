@@ -284,7 +284,7 @@ struct MacContentView: View {
                 if !needsAttentionReminders.isEmpty {
                     MacSectionCard(title: "Needs Attention", icon: "exclamationmark.circle.fill", color: .red) {
                         ForEach(needsAttentionReminders) { reminder in
-                            MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id) {
+                            MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id, showSnooze: true) {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
                                 }
@@ -490,7 +490,12 @@ struct MacReminderRow: View {
     @Bindable var reminder: Reminder
     let isHabit: Bool
     let isSelected: Bool
+    var showSnooze: Bool = false
     let onTap: () -> Void
+
+    private var isMuted: Bool {
+        reminder.isDistantRecurring
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -515,7 +520,7 @@ struct MacReminderRow: View {
                 Text(reminder.title)
                     .lineLimit(2)
                     .strikethrough(isChecked)
-                    .foregroundStyle(isChecked ? .secondary : .primary)
+                    .foregroundStyle(isChecked || isMuted ? .secondary : .primary)
 
                 HStack(spacing: 8) {
                     if let category = reminder.category, !isHabit {
@@ -524,13 +529,22 @@ struct MacReminderRow: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    if let dueDate = reminder.dueDate, !isHabit {
+                    if isMuted, let dueText = reminder.daysUntilDueText {
+                        // Show "in X days" for distant recurring
+                        HStack(spacing: 2) {
+                            Image(systemName: "repeat")
+                                .font(.system(size: 9))
+                            Text(dueText)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    } else if let dueDate = reminder.dueDate, !isHabit {
                         Text(formatDate(dueDate))
                             .font(.caption)
                             .foregroundStyle(dateColor(dueDate))
                     }
 
-                    if reminder.recurrence != .none {
+                    if reminder.recurrence != .none && !isMuted {
                         HStack(spacing: 2) {
                             Image(systemName: "arrow.trianglehead.2.clockwise")
                             Text(reminder.recurrence.label)
@@ -542,6 +556,22 @@ struct MacReminderRow: View {
             }
 
             Spacer()
+
+            // Snooze button for needs attention items
+            if showSnooze {
+                Button {
+                    snoozeToTomorrow()
+                } label: {
+                    Text("Snooze")
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.orange)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
@@ -549,6 +579,7 @@ struct MacReminderRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
+        .opacity(isMuted ? 0.6 : 1.0)
     }
 
     private var isChecked: Bool {
@@ -566,6 +597,12 @@ struct MacReminderRow: View {
         if date < Date() { return .red }
         if Calendar.current.isDateInToday(date) { return .orange }
         return .secondary
+    }
+
+    private func snoozeToTomorrow() {
+        let calendar = Calendar.current
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
+        reminder.dueDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow)
     }
 }
 
