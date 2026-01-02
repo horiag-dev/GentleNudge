@@ -25,11 +25,13 @@ struct SettingsView: View {
     @State private var iCloudSyncStatus: SyncStatus = .idle
     @State private var lastSyncTime: Date?
 
-    // Notification settings
+    // Notification settings (iOS only)
+    #if os(iOS)
     @State private var notificationsEnabled = NotificationService.shared.isEnabled
     @State private var notificationTime = NotificationService.shared.notificationTime
     @State private var notificationPermissionStatus: String = "Checking..."
     @State private var isTestingNotification = false
+    #endif
 
     enum SyncStatus {
         case idle
@@ -60,7 +62,8 @@ struct SettingsView: View {
                     Text("Import reminders due today from Apple Reminders. AI will analyze and categorize them automatically.")
                 }
 
-                // Morning Notification
+                // Morning Notification (iOS only)
+                #if os(iOS)
                 Section {
                     Toggle(isOn: $notificationsEnabled) {
                         Label("Morning Summary", systemImage: "bell.badge.fill")
@@ -118,6 +121,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Get a morning reminder of items that need attention. The notification shows overdue items, items due today, and high priority tasks.")
                 }
+                #endif
 
                 // iCloud Sync
                 Section {
@@ -456,9 +460,11 @@ struct SettingsView: View {
             }
             .onAppear {
                 loadBackupList()
+                #if os(iOS)
                 Task {
                     await checkNotificationPermission()
                 }
+                #endif
             }
         }
     }
@@ -844,8 +850,9 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Notification Functions
+    // MARK: - Notification Functions (iOS only)
 
+    #if os(iOS)
     private func checkNotificationPermission() async {
         let status = await NotificationService.shared.checkPermissionStatus()
         await MainActor.run {
@@ -906,6 +913,7 @@ struct SettingsView: View {
             topItems: Array(topItems)
         )
     }
+    #endif
 
     private func generateTestReminders() {
         let calendar = Calendar.current

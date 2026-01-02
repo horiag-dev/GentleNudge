@@ -254,13 +254,16 @@ struct HabitRow: View {
                 .foregroundStyle(.orange)
             }
 
+            #if os(iOS)
             // Mini heatmap (last 14 days)
             HabitMiniHeatmap(habit: habit, days: 14)
+            #endif
         }
         .padding(.vertical, Constants.Spacing.xs)
         .padding(.horizontal, Constants.Spacing.xs)
         .background(AppColors.background.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+        #if os(iOS)
         .contentShape(Rectangle())
         .onTapGesture {
             showingHeatmap = true
@@ -268,9 +271,11 @@ struct HabitRow: View {
         .sheet(isPresented: $showingHeatmap) {
             HabitDetailSheet(habit: habit)
         }
+        #endif
     }
 }
 
+#if os(iOS)
 struct HabitDetailSheet: View {
     let habit: Reminder
     @Environment(\.dismiss) private var dismiss
@@ -309,6 +314,7 @@ struct HabitDetailSheet: View {
         .presentationDetents([.medium, .large])
     }
 }
+#endif
 
 // MARK: - Needs Attention Row
 
