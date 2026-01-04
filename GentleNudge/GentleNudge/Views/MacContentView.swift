@@ -298,12 +298,43 @@ struct MacContentView: View {
                     let categoryReminders = remindersForCategory(category).filter { r in
                         !needsAttentionReminders.contains { $0.id == r.id }
                     }
+                    let activeReminders = categoryReminders.filter { !$0.isDistantRecurring }
+                    let upcomingRecurring = categoryReminders.filter { $0.isDistantRecurring }
+                        .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+
                     if !categoryReminders.isEmpty {
                         MacSectionCard(title: category.name, icon: category.icon, color: category.color) {
-                            ForEach(categoryReminders) { reminder in
-                                MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id) {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
+                            VStack(alignment: .leading, spacing: 2) {
+                                // Active reminders
+                                ForEach(activeReminders) { reminder in
+                                    MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id) {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
+                                        }
+                                    }
+                                }
+
+                                // Upcoming recurring section
+                                if !upcomingRecurring.isEmpty {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "repeat")
+                                            .font(.caption2)
+                                        Text("Upcoming")
+                                            .font(.caption)
+                                        Text("(\(upcomingRecurring.count))")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, activeReminders.isEmpty ? 0 : 8)
+                                    .padding(.bottom, 2)
+
+                                    ForEach(upcomingRecurring) { reminder in
+                                        MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id) {
+                                            withAnimation(.easeInOut(duration: 0.2)) {
+                                                selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -467,7 +498,7 @@ struct MacSectionCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .foregroundStyle(color)
@@ -477,7 +508,7 @@ struct MacSectionCard<Content: View>: View {
 
             content
         }
-        .padding(16)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(color.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -572,7 +603,7 @@ struct MacReminderRow: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 6))
