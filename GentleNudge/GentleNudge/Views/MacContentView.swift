@@ -133,8 +133,8 @@ struct MacContentView: View {
                     ) { selectedSidebarItem = .recurring }
 
                     SmartListCard(
-                        icon: "heart.circle.fill",
-                        color: .pink,
+                        icon: "leaf.circle.fill",
+                        color: .teal,
                         title: "Habits",
                         count: habitReminders.count,
                         isSelected: selectedSidebarItem == .habits
@@ -254,16 +254,16 @@ struct MacContentView: View {
             LazyVStack(spacing: 16) {
                 // Habits Section
                 if !habitReminders.isEmpty {
-                    MacSectionCard(title: "Habits", icon: "heart.circle.fill", color: .pink) {
+                    MacSectionCard(title: "Habits", icon: "leaf.circle.fill", color: .teal) {
                         // Progress bar
                         let completed = habitReminders.filter { $0.isCompletedToday }.count
                         VStack(spacing: 8) {
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
                                     RoundedRectangle(cornerRadius: 3)
-                                        .fill(Color.pink.opacity(0.2))
+                                        .fill(Color.teal.opacity(0.2))
                                     RoundedRectangle(cornerRadius: 3)
-                                        .fill(Color.pink)
+                                        .fill(Color.teal)
                                         .frame(width: geo.size.width * CGFloat(completed) / CGFloat(max(habitReminders.count, 1)))
                                 }
                             }
@@ -379,7 +379,7 @@ struct MacContentView: View {
         case .all: return .gray
         case .recurring: return .orange
         case .completed: return .gray
-        case .habits: return .pink
+        case .habits: return .teal
         case .category(let cat): return cat.color
         case .none: return .primary
         }
@@ -487,6 +487,7 @@ struct MacSectionCard<Content: View>: View {
 // MARK: - Mac Reminder Row
 
 struct MacReminderRow: View {
+    @Environment(\.modelContext) private var modelContext
     @Bindable var reminder: Reminder
     let isHabit: Bool
     let isSelected: Bool
@@ -505,7 +506,7 @@ struct MacReminderRow: View {
                     if isHabit {
                         reminder.isCompletedToday ? reminder.clearHabitCompletion() : reminder.markHabitDoneToday()
                     } else {
-                        reminder.isCompleted ? reminder.markIncomplete() : reminder.markCompleted()
+                        reminder.isCompleted ? reminder.markIncomplete() : completeReminder()
                     }
                 }
             } label: {
@@ -544,13 +545,11 @@ struct MacReminderRow: View {
                             .foregroundStyle(dateColor(dueDate))
                     }
 
-                    if reminder.recurrence != .none && !isMuted {
-                        HStack(spacing: 2) {
-                            Image(systemName: "arrow.trianglehead.2.clockwise")
-                            Text(reminder.recurrence.label)
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    if reminder.isRecurring && !isMuted {
+                        RecurrenceBadge(
+                            recurrence: reminder.recurrence,
+                            compact: false
+                        )
                     }
                 }
             }
@@ -602,6 +601,14 @@ struct MacReminderRow: View {
         return .secondary
     }
 
+    private func completeReminder() {
+        // If recurring, create next occurrence before marking complete
+        if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
+            modelContext.insert(nextReminder)
+        }
+        reminder.markCompleted()
+    }
+
     private func snoozeToTomorrow() {
         let calendar = Calendar.current
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
@@ -646,7 +653,17 @@ struct MacReminderDetailPanel: View {
                 VStack(alignment: .leading, spacing: 16) {
                     // Complete toggle
                     Button {
-                        withAnimation { reminder.isCompleted ? reminder.markIncomplete() : reminder.markCompleted() }
+                        withAnimation {
+                            if reminder.isCompleted {
+                                reminder.markIncomplete()
+                            } else {
+                                // Create next occurrence for recurring reminders
+                                if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
+                                    modelContext.insert(nextReminder)
+                                }
+                                reminder.markCompleted()
+                            }
+                        }
                     } label: {
                         Label(
                             reminder.isCompleted ? "Completed" : "Mark Complete",

@@ -202,7 +202,21 @@ struct ReminderDetailView: View {
 
                 // Recurrence (only show if due date is set)
                 if hasDueDate {
-                    RecurrencePicker(recurrence: $reminder.recurrence)
+                    VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
+                        RecurrencePicker(recurrence: $reminder.recurrence)
+
+                        // Show detailed recurrence description
+                        if let detailed = reminder.detailedRecurrence {
+                            HStack(spacing: Constants.Spacing.xs) {
+                                Image(systemName: "info.circle")
+                                    .foregroundStyle(.purple)
+                                Text(detailed)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, Constants.Spacing.sm)
+                        }
+                    }
                 }
 
                 // Metadata

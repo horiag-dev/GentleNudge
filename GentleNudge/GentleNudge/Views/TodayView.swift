@@ -187,11 +187,13 @@ struct HabitsSection: View {
         habits.filter { $0.isCompletedToday }.count
     }
 
+    private let habitColor: Color = .teal
+
     var body: some View {
         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
             HStack {
-                Image(systemName: "heart.circle.fill")
-                    .foregroundStyle(.red)
+                Image(systemName: "leaf.circle.fill")
+                    .foregroundStyle(habitColor)
                 Text("Habits")
                     .font(.headline)
                 Spacer()
@@ -204,11 +206,11 @@ struct HabitsSection: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.red.opacity(0.2))
+                        .fill(habitColor.opacity(0.2))
                         .frame(height: 5)
 
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.red)
+                        .fill(habitColor)
                         .frame(width: geo.size.width * CGFloat(completedCount) / CGFloat(max(habits.count, 1)), height: 5)
                         .animation(.spring, value: completedCount)
                 }
@@ -224,7 +226,7 @@ struct HabitsSection: View {
         .padding(Constants.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                .fill(Color.red.opacity(0.10))
+                .fill(Color.teal.opacity(0.10))
         )
     }
 }
@@ -363,6 +365,7 @@ struct HabitDetailSheet: View {
 // MARK: - Needs Attention Row
 
 struct NeedsAttentionRow: View {
+    @Environment(\.modelContext) private var modelContext
     @Bindable var reminder: Reminder
     @State private var showingDetail = false
 
@@ -372,9 +375,10 @@ struct NeedsAttentionRow: View {
             Button {
                 withAnimation(Constants.Animation.spring) {
                     HapticManager.impact(.medium)
-                    reminder.isCompleted.toggle()
                     if reminder.isCompleted {
-                        reminder.completedAt = Date()
+                        reminder.markIncomplete()
+                    } else {
+                        completeReminder()
                     }
                 }
             } label: {
@@ -402,14 +406,8 @@ struct NeedsAttentionRow: View {
                             .foregroundStyle(dateColor(dueDate))
                     }
 
-                    if reminder.recurrence != .none {
-                        HStack(spacing: 2) {
-                            Image(systemName: "arrow.trianglehead.2.clockwise")
-                                .font(.system(size: 8))
-                            Text(reminder.recurrence.label)
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
+                    if reminder.isRecurring {
+                        RecurrenceBadge(recurrence: reminder.recurrence)
                     }
                 }
             }
@@ -446,6 +444,14 @@ struct NeedsAttentionRow: View {
         }
     }
 
+    private func completeReminder() {
+        // If recurring, create next occurrence before marking complete
+        if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
+            modelContext.insert(nextReminder)
+        }
+        reminder.markCompleted()
+    }
+
     private func snoozeToTomorrow() {
         let calendar = Calendar.current
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
@@ -476,6 +482,23 @@ struct HomeCategorySection: View {
     let category: Category
     let reminders: [Reminder]
 
+    // Active: non-recurring, or recurring that's due soon (within 3 days)
+    private var activeReminders: [Reminder] {
+        reminders.filter { !$0.isDistantRecurring }
+            .sorted { r1, r2 in
+                // Due soon first, then by priority
+                if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
+                if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
+                return r1.priority.rawValue > r2.priority.rawValue
+            }
+    }
+
+    // Upcoming: recurring items due later (muted)
+    private var upcomingRecurring: [Reminder] {
+        reminders.filter { $0.isDistantRecurring }
+            .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
             // Header
@@ -498,11 +521,33 @@ struct HomeCategorySection: View {
             }
             .buttonStyle(.plain)
 
-            // Reminders list
-            VStack(spacing: 4) {
-                ForEach(reminders) { reminder in
-                    ReminderRow(reminder: reminder)
+            // Active reminders
+            if !activeReminders.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(activeReminders) { reminder in
+                        ReminderRow(reminder: reminder)
+                    }
                 }
+            }
+
+            // Upcoming recurring (collapsed section)
+            if !upcomingRecurring.isEmpty {
+                DisclosureGroup {
+                    VStack(spacing: 4) {
+                        ForEach(upcomingRecurring) { reminder in
+                            ReminderRow(reminder: reminder)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "repeat")
+                            .font(.caption2)
+                        Text("Upcoming (\(upcomingRecurring.count))")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .tint(.secondary)
             }
         }
         .padding(Constants.Spacing.md)
@@ -519,17 +564,20 @@ struct CategoryDetailView: View {
     let category: Category
     @Query private var reminders: [Reminder]
 
-    private var categoryReminders: [Reminder] {
-        reminders.filter { $0.category?.id == category.id && !$0.isCompleted }
+    // Active: non-recurring, or recurring due soon
+    private var activeReminders: [Reminder] {
+        reminders.filter { $0.category?.id == category.id && !$0.isCompleted && !$0.isDistantRecurring }
             .sorted { r1, r2 in
-                // Today/overdue items first, then by priority
-                let r1Today = r1.isDueToday || r1.isOverdue
-                let r2Today = r2.isDueToday || r2.isOverdue
-                if r1Today != r2Today {
-                    return r1Today
-                }
+                if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
+                if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
                 return r1.priority.rawValue > r2.priority.rawValue
             }
+    }
+
+    // Upcoming recurring
+    private var upcomingRecurring: [Reminder] {
+        reminders.filter { $0.category?.id == category.id && !$0.isCompleted && $0.isDistantRecurring }
+            .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
     }
 
     private var completedReminders: [Reminder] {
@@ -539,10 +587,14 @@ struct CategoryDetailView: View {
             .map { $0 }
     }
 
+    private var hasAnyReminders: Bool {
+        !activeReminders.isEmpty || !upcomingRecurring.isEmpty
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: Constants.Spacing.sm) {
-                if categoryReminders.isEmpty {
+                if !hasAnyReminders {
                     ContentUnavailableView(
                         "No Reminders",
                         systemImage: category.icon,
@@ -550,11 +602,50 @@ struct CategoryDetailView: View {
                     )
                     .padding(.top, Constants.Spacing.xl)
                 } else {
-                    ForEach(categoryReminders) { reminder in
-                        ReminderRow(reminder: reminder)
+                    // Active reminders
+                    if !activeReminders.isEmpty {
+                        Section {
+                            ForEach(activeReminders) { reminder in
+                                ReminderRow(reminder: reminder)
+                            }
+                        } header: {
+                            if !upcomingRecurring.isEmpty {
+                                HStack {
+                                    Text("Active")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+
+                    // Upcoming recurring
+                    if !upcomingRecurring.isEmpty {
+                        Section {
+                            ForEach(upcomingRecurring) { reminder in
+                                ReminderRow(reminder: reminder)
+                            }
+                        } header: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "repeat")
+                                    .font(.caption)
+                                Text("Upcoming Recurring")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Spacer()
+                                Text("\(upcomingRecurring.count)")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .foregroundStyle(.secondary)
+                            .padding(.top, activeReminders.isEmpty ? 0 : Constants.Spacing.md)
+                        }
                     }
                 }
 
+                // Recently completed
                 if !completedReminders.isEmpty {
                     Section {
                         ForEach(completedReminders) { reminder in

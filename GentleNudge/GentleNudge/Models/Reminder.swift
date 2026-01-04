@@ -303,4 +303,57 @@ final class Reminder {
         guard isRecurring else { return nil }
         return recurrence.label
     }
+
+    /// Detailed recurrence description including the specific day/date
+    var detailedRecurrence: String? {
+        guard isRecurring, let dueDate = dueDate else { return nil }
+
+        let calendar = Calendar.current
+        let weekday = calendar.component(.weekday, from: dueDate)
+        let dayOfMonth = calendar.component(.day, from: dueDate)
+        let weekdayName = calendar.weekdaySymbols[weekday - 1]
+
+        switch recurrence {
+        case .none:
+            return nil
+        case .daily:
+            return "Every day"
+        case .weekdays:
+            return "Every weekday (Mon-Fri)"
+        case .weekends:
+            return "Every weekend"
+        case .weekly:
+            return "Every \(weekdayName)"
+        case .biweekly:
+            return "Every other \(weekdayName)"
+        case .monthly:
+            return "Monthly on the \(ordinal(dayOfMonth))"
+        case .quarterly:
+            return "Every 3 months on the \(ordinal(dayOfMonth))"
+        case .semiannually:
+            return "Every 6 months on the \(ordinal(dayOfMonth))"
+        case .yearly:
+            let month = calendar.component(.month, from: dueDate)
+            let monthName = calendar.monthSymbols[month - 1]
+            return "Every year on \(monthName) \(dayOfMonth)"
+        }
+    }
+
+    private func ordinal(_ n: Int) -> String {
+        let suffix: String
+        let ones = n % 10
+        let tens = (n / 10) % 10
+
+        if tens == 1 {
+            suffix = "th"
+        } else {
+            switch ones {
+            case 1: suffix = "st"
+            case 2: suffix = "nd"
+            case 3: suffix = "rd"
+            default: suffix = "th"
+            }
+        }
+        return "\(n)\(suffix)"
+    }
 }

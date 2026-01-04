@@ -36,15 +36,15 @@ struct ReminderRow: View {
                 .padding(.top, 2)
 
                 // Title and metadata
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(reminder.title)
                         .font(.subheadline)
                         .foregroundStyle(reminder.isCompleted || isMuted ? .secondary : .primary)
                         .strikethrough(reminder.isCompleted)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    // Priority & Date
-                    HStack(spacing: 4) {
+                    // Priority, Date & Recurrence
+                    HStack(spacing: 6) {
                         if let icon = reminder.priority.icon {
                             Image(systemName: icon)
                                 .font(.caption2)
@@ -59,15 +59,18 @@ struct ReminderRow: View {
                             Text("Overdue")
                                 .font(.caption2)
                                 .foregroundStyle(.red)
-                        } else if isMuted, let dueText = reminder.daysUntilDueText {
-                            // Show "in X days" for distant recurring
-                            HStack(spacing: 2) {
-                                Image(systemName: "repeat")
-                                    .font(.system(size: 8))
-                                Text(dueText)
-                            }
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                        } else if let dueDate = reminder.dueDate {
+                            Text(dueDate.formatted(date: .abbreviated, time: .omitted))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        // Recurrence badge
+                        if reminder.isRecurring {
+                            RecurrenceBadge(
+                                recurrence: reminder.recurrence,
+                                detailedText: isMuted ? reminder.daysUntilDueText : nil
+                            )
                         }
                     }
                 }

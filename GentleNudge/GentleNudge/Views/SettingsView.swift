@@ -384,10 +384,16 @@ struct SettingsView: View {
                     } label: {
                         Label("Update Category Colors", systemImage: "paintpalette")
                     }
+
+                    Button {
+                        recoverRecurringTasks()
+                    } label: {
+                        Label("Recover Recurring Tasks", systemImage: "arrow.counterclockwise")
+                    }
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Update Category Colors applies the latest color scheme (House=green, Today=yellow, etc.)")
+                    Text("Recover Recurring Tasks: If recurring reminders were completed without creating the next occurrence, this will recreate them.")
                 }
 
                 // About
@@ -613,6 +619,52 @@ struct SettingsView: View {
             modelContext.delete(reminder)
         }
         try? modelContext.save()
+        HapticManager.notification(.success)
+    }
+
+    private func recoverRecurringTasks() {
+        // Find completed recurring reminders that don't have an active next occurrence
+        let completedRecurring = reminders.filter { $0.isCompleted && $0.isRecurring }
+
+        var recoveredCount = 0
+
+        for reminder in completedRecurring {
+            // Check if there's already an active (non-completed) reminder with the same title and recurrence
+            let hasActiveOccurrence = reminders.contains { r in
+                !r.isCompleted &&
+                r.title == reminder.title &&
+                r.recurrence == reminder.recurrence
+            }
+
+            if !hasActiveOccurrence {
+                // Create the next occurrence from the completed reminder
+                if let nextReminder = reminder.createNextOccurrence() {
+                    // Adjust the due date to be in the future if needed
+                    var adjustedReminder = nextReminder
+
+                    // Keep advancing until the due date is in the future
+                    while let dueDate = adjustedReminder.dueDate, dueDate < Date() {
+                        if let advancedReminder = adjustedReminder.createNextOccurrence() {
+                            adjustedReminder = advancedReminder
+                        } else {
+                            break
+                        }
+                    }
+
+                    modelContext.insert(adjustedReminder)
+                    recoveredCount += 1
+                }
+            }
+        }
+
+        try? modelContext.save()
+
+        if recoveredCount > 0 {
+            syncMessage = "Recovered \(recoveredCount) recurring task\(recoveredCount == 1 ? "" : "s")"
+        } else {
+            syncMessage = "No recurring tasks needed recovery"
+        }
+        showingSyncAlert = true
         HapticManager.notification(.success)
     }
 
