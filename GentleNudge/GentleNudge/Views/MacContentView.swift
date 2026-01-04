@@ -574,6 +574,30 @@ struct MacReminderRow: View {
         reminder.isDistantRecurring
     }
 
+    private var currentStreak: Int {
+        guard isHabit else { return 0 }
+        let calendar = Calendar.current
+        var streak = 0
+        var checkDate = calendar.startOfDay(for: Date())
+
+        if !reminder.wasCompletedOn(date: checkDate) {
+            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: checkDate) else {
+                return 0
+            }
+            checkDate = yesterday
+        }
+
+        while reminder.wasCompletedOn(date: checkDate) {
+            streak += 1
+            guard let previousDay = calendar.date(byAdding: .day, value: -1, to: checkDate) else {
+                break
+            }
+            checkDate = previousDay
+        }
+
+        return streak
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // Checkbox
@@ -631,6 +655,18 @@ struct MacReminderRow: View {
             }
 
             Spacer()
+
+            // Streak indicator for habits
+            if isHabit && currentStreak > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "flame.fill")
+                        .font(.caption)
+                    Text("\(currentStreak)")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .foregroundStyle(.orange)
+            }
 
             // Snooze button for needs attention items
             if showSnooze {
