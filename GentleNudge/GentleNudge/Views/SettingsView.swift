@@ -931,7 +931,7 @@ struct SettingsView: View {
         // Calculate needs attention items
         let needsAttention = reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
+            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
         }
 
         // Get top item titles
@@ -954,7 +954,7 @@ struct SettingsView: View {
         // Calculate needs attention items
         let needsAttention = reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
+            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
         }
 
         // Get top item titles
@@ -986,7 +986,7 @@ struct SettingsView: View {
                     title: data.title,
                     notes: data.notes,
                     dueDate: nil,
-                    priority: .none,
+                    priority: .normal,
                     category: habitsCategory,
                     recurrence: .daily
                 )
@@ -1014,55 +1014,55 @@ struct SettingsView: View {
         // nil daysOffset means no due date
         let testData: [(categoryName: String, reminders: [(title: String, notes: String, daysOffset: Int?, priority: ReminderPriority, recurrence: RecurrenceType)])] = [
             ("Today", [
-                ("Call dentist", "Schedule cleaning", 0, .medium, .none),
-                ("Submit expense report", "From last trip", 0, .high, .none),
-                ("Pick up dry cleaning", "Before 6pm", 0, .low, .none),
+                ("Call dentist", "Schedule cleaning", 0, .normal, .none),
+                ("Submit expense report", "From last trip", 0, .urgent, .none),
+                ("Pick up dry cleaning", "Before 6pm", 0, .normal, .none),
             ]),
             ("To Read", [
-                ("Atomic Habits", "Finish chapter 5", nil, .none, .none),
-                ("The Mom Test", "Customer interview techniques", nil, .none, .none),
-                ("Saved Pocket articles", "50+ items in queue", nil, .none, .none),
-                ("Stratechery newsletter", "Backlog of 10 issues", nil, .none, .none),
+                ("Atomic Habits", "Finish chapter 5", nil, .normal, .none),
+                ("The Mom Test", "Customer interview techniques", nil, .normal, .none),
+                ("Saved Pocket articles", "50+ items in queue", nil, .normal, .none),
+                ("Stratechery newsletter", "Backlog of 10 issues", nil, .normal, .none),
             ]),
             ("Startup", [
-                ("Update pitch deck", "Add Q4 metrics", nil, .none, .none),
-                ("Customer discovery calls", "Talk to 5 more users", nil, .none, .none),
-                ("Roadmap planning", "Q1 priorities", nil, .none, .none),
-                ("Competitor analysis", "Check Product Hunt launches", nil, .none, .none),
-                ("Investor update", "Monthly email", 15, .medium, .monthly),
+                ("Update pitch deck", "Add Q4 metrics", nil, .normal, .none),
+                ("Customer discovery calls", "Talk to 5 more users", nil, .normal, .none),
+                ("Roadmap planning", "Q1 priorities", nil, .normal, .none),
+                ("Competitor analysis", "Check Product Hunt launches", nil, .normal, .none),
+                ("Investor update", "Monthly email", 15, .normal, .monthly),
             ]),
             ("Finance", [
-                ("Review subscriptions", "Cancel unused ones", nil, .none, .none),
-                ("Tax documents", "Gather for accountant", 7, .high, .none),
-                ("Rebalance portfolio", "Check allocation", nil, .none, .none),
+                ("Review subscriptions", "Cancel unused ones", nil, .normal, .none),
+                ("Tax documents", "Gather for accountant", 7, .urgent, .none),
+                ("Rebalance portfolio", "Check allocation", nil, .normal, .none),
             ]),
             ("House", [
-                ("Fix leaky faucet", "Kitchen sink", nil, .none, .none),
-                ("Organize garage", "Donate old stuff", nil, .none, .none),
-                ("Water plants", "All indoor plants", nil, .none, .weekly),
+                ("Fix leaky faucet", "Kitchen sink", nil, .normal, .none),
+                ("Organize garage", "Donate old stuff", nil, .normal, .none),
+                ("Water plants", "All indoor plants", nil, .normal, .weekly),
             ]),
             ("Photos", [
-                ("Backup phone photos", "To external drive", nil, .none, .none),
-                ("Edit vacation pics", "Apply presets", nil, .none, .none),
-                ("Print family photos", "For grandma", nil, .none, .none),
-                ("Organize photo library", "Delete duplicates", nil, .none, .none),
+                ("Backup phone photos", "To external drive", nil, .normal, .none),
+                ("Edit vacation pics", "Apply presets", nil, .normal, .none),
+                ("Print family photos", "For grandma", nil, .normal, .none),
+                ("Organize photo library", "Delete duplicates", nil, .normal, .none),
             ]),
             ("Explore", [
-                ("New ramen place", "Downtown location", nil, .none, .none),
-                ("Hiking trail", "Mt. Tamalpais", nil, .none, .none),
-                ("Cooking class", "Italian cuisine", nil, .none, .none),
-                ("Art museum exhibit", "Opens next month", nil, .none, .none),
+                ("New ramen place", "Downtown location", nil, .normal, .none),
+                ("Hiking trail", "Mt. Tamalpais", nil, .normal, .none),
+                ("Cooking class", "Italian cuisine", nil, .normal, .none),
+                ("Art museum exhibit", "Opens next month", nil, .normal, .none),
             ]),
             ("GenAI", [
-                ("Claude vision API", "Test with screenshots", nil, .none, .none),
-                ("Build demo app", "Showcase for meetup", nil, .none, .none),
-                ("Prompt engineering", "Improve system prompts", nil, .none, .none),
-                ("AI paper reading", "Attention is all you need", nil, .none, .none),
+                ("Claude vision API", "Test with screenshots", nil, .normal, .none),
+                ("Build demo app", "Showcase for meetup", nil, .normal, .none),
+                ("Prompt engineering", "Improve system prompts", nil, .normal, .none),
+                ("AI paper reading", "Attention is all you need", nil, .normal, .none),
             ]),
             ("Misc", [
-                ("Organize bookmarks", "Browser cleanup", nil, .none, .none),
-                ("Update LinkedIn", "Add recent projects", nil, .none, .none),
-                ("Email inbox zero", "Archive old threads", nil, .none, .none),
+                ("Organize bookmarks", "Browser cleanup", nil, .normal, .none),
+                ("Update LinkedIn", "Add recent projects", nil, .normal, .none),
+                ("Email inbox zero", "Archive old threads", nil, .normal, .none),
             ]),
         ]
 

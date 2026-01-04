@@ -17,7 +17,7 @@ struct TodayView: View {
         reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
             // Include: overdue, due today, or high priority
-            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
+            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
         }
         .sorted { r1, r2 in
             // Overdue first, then due today, then high priority
@@ -55,7 +55,7 @@ struct TodayView: View {
                   !reminder.isCompleted,
                   !reminder.isHabit else { return false }
             // Exclude items already in Needs Attention
-            let inNeedsAttention = reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
+            let inNeedsAttention = reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
             return !inNeedsAttention
         }
         .sorted { $0.priority.rawValue > $1.priority.rawValue }

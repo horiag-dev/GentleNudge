@@ -30,7 +30,7 @@ struct MacContentView: View {
     private var needsAttentionReminders: [Reminder] {
         reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .high
+            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
         }
         .sorted { r1, r2 in
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
@@ -914,8 +914,8 @@ struct PriorityPill: View {
             .font(.caption)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(isSelected ? (priority == .none ? .gray : priority.color) : AppColors.secondaryBackground)
-            .foregroundStyle(isSelected ? .white : (priority == .none ? .primary : priority.color))
+            .background(isSelected ? (priority == .normal ? .gray : priority.color) : AppColors.secondaryBackground)
+            .foregroundStyle(isSelected ? .white : (priority == .normal ? .primary : priority.color))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)

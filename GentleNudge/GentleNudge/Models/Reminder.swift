@@ -81,35 +81,38 @@ enum RecurrenceType: Int, Codable, CaseIterable {
 }
 
 enum ReminderPriority: Int, Codable, CaseIterable {
-    case none = 0
-    case low = 1
-    case medium = 2
-    case high = 3
+    case normal = 0
+    case urgent = 3  // Keep rawValue 3 to match old "high" for existing data
 
     var label: String {
         switch self {
-        case .none: return "None"
-        case .low: return "Low"
-        case .medium: return "Medium"
-        case .high: return "High"
+        case .normal: return "Normal"
+        case .urgent: return "Urgent"
         }
     }
 
     var icon: String? {
         switch self {
-        case .none: return nil
-        case .low: return "exclamationmark"
-        case .medium: return "exclamationmark.2"
-        case .high: return "exclamationmark.3"
+        case .normal: return nil
+        case .urgent: return "exclamationmark.circle.fill"
         }
     }
 
     var color: Color {
         switch self {
-        case .none: return .gray
-        case .low: return .blue
-        case .medium: return .orange
-        case .high: return .red
+        case .normal: return .gray
+        case .urgent: return .red
+        }
+    }
+
+    // Migration: map old values to new
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(Int.self)
+        // Map old low(1), medium(2) to normal(0), high(3) stays as urgent(3)
+        switch rawValue {
+        case 3: self = .urgent
+        default: self = .normal
         }
     }
 }
@@ -139,7 +142,7 @@ final class Reminder {
         title: String,
         notes: String = "",
         dueDate: Date? = nil,
-        priority: ReminderPriority = .none,
+        priority: ReminderPriority = .normal,
         isCompleted: Bool = false,
         category: Category? = nil,
         recurrence: RecurrenceType = .none
@@ -157,7 +160,7 @@ final class Reminder {
     }
 
     var priority: ReminderPriority {
-        get { ReminderPriority(rawValue: priorityRaw) ?? .none }
+        get { ReminderPriority(rawValue: priorityRaw) ?? .normal }
         set { priorityRaw = newValue.rawValue }
     }
 

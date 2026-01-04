@@ -275,10 +275,8 @@ actor AppleRemindersService {
 
     private func mapFromEKPriority(_ priority: Int) -> ReminderPriority {
         switch priority {
-        case 1...4: return .high
-        case 5: return .medium
-        case 6...9: return .low
-        default: return .none
+        case 1...4: return .urgent
+        default: return .normal
         }
     }
 
@@ -298,10 +296,8 @@ actor AppleRemindersService {
 
     private func mapPriority(_ priority: ReminderPriority) -> Int {
         switch priority {
-        case .none: return 0
-        case .low: return 9
-        case .medium: return 5
-        case .high: return 1
+        case .normal: return 0
+        case .urgent: return 1
         }
     }
 }

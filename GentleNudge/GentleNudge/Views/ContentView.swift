@@ -2,9 +2,17 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var reminders: [Reminder]
     @State private var selectedTab = 0
     @State private var showingAddReminder = false
+
+    private var needsAttentionCount: Int {
+        reminders.filter { reminder in
+            guard !reminder.isHabit, !reminder.isCompleted else { return false }
+            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
+        }.count
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -61,7 +69,28 @@ struct ContentView: View {
             } catch {
                 print("Backup failed: \(error.localizedDescription)")
             }
+
+            #if os(iOS)
+            // Update badge on launch
+            await NotificationService.shared.updateBadgeCount(needsAttentionCount)
+            #endif
         }
+        #if os(iOS)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                // Update badge when app becomes active
+                Task {
+                    await NotificationService.shared.updateBadgeCount(needsAttentionCount)
+                }
+            }
+        }
+        .onChange(of: reminders) { _, _ in
+            // Update badge when reminders change
+            Task {
+                await NotificationService.shared.updateBadgeCount(needsAttentionCount)
+            }
+        }
+        #endif
     }
 }
 

@@ -12,13 +12,31 @@ struct AddReminderView: View {
     @State private var selectedCategory: Category?
     @State private var dueDate: Date?
     @State private var hasDueDate = false
-    @State private var priority: ReminderPriority = .none
+    @State private var priority: ReminderPriority = .normal
     @State private var recurrence: RecurrenceType = .none
 
     @State private var isSuggestingCategory = false
     @State private var isEnhancing = false
     @State private var aiContext = ""
     @State private var showingDatePicker = false
+
+    // Quick date selection helpers
+    private var isDateToday: Bool {
+        guard let dueDate = dueDate else { return false }
+        return Calendar.current.isDateInToday(dueDate)
+    }
+
+    private var isDateTomorrow: Bool {
+        guard let dueDate = dueDate else { return false }
+        return Calendar.current.isDateInTomorrow(dueDate)
+    }
+
+    private var isDateNextWeek: Bool {
+        guard let dueDate = dueDate else { return false }
+        let calendar = Calendar.current
+        let nextWeek = calendar.date(byAdding: .day, value: 7, to: calendar.startOfDay(for: Date()))!
+        return calendar.isDate(dueDate, inSameDayAs: nextWeek)
+    }
 
     var body: some View {
         NavigationStack {
@@ -162,13 +180,13 @@ struct AddReminderView: View {
 
                             if hasDueDate {
                                 HStack(spacing: Constants.Spacing.xs) {
-                                    QuickDateButton(title: "Today", date: Date()) {
+                                    QuickDateButton(title: "Today", date: Date(), isSelected: isDateToday) {
                                         dueDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date())
                                     }
-                                    QuickDateButton(title: "Tomorrow", date: Date.tomorrow) {
+                                    QuickDateButton(title: "Tomorrow", date: Date.tomorrow, isSelected: isDateTomorrow) {
                                         dueDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date.tomorrow)
                                     }
-                                    QuickDateButton(title: "Next Week", date: Date.nextWeek) {
+                                    QuickDateButton(title: "Next Week", date: Date.nextWeek, isSelected: isDateNextWeek) {
                                         dueDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date.nextWeek)
                                     }
                                 }
@@ -335,6 +353,7 @@ struct AddReminderView: View {
 struct QuickDateButton: View {
     let title: String
     let date: Date
+    var isSelected: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -342,9 +361,10 @@ struct QuickDateButton: View {
             Text(title)
                 .font(.caption)
                 .fontWeight(.medium)
+                .foregroundStyle(isSelected ? .white : .primary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(AppColors.tertiaryBackground)
+                .background(isSelected ? Color.accentColor : AppColors.tertiaryBackground)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -366,10 +386,10 @@ struct PriorityButton: View {
             }
             .font(.subheadline)
             .fontWeight(.medium)
-            .foregroundStyle(isSelected ? .white : priority == .none ? .primary : priority.color)
+            .foregroundStyle(isSelected ? .white : priority == .normal ? .primary : priority.color)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isSelected ? (priority == .none ? Color.gray : priority.color) : AppColors.secondaryBackground)
+            .background(isSelected ? (priority == .normal ? Color.gray : priority.color) : AppColors.secondaryBackground)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)

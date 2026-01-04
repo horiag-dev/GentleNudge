@@ -4,12 +4,13 @@ import SwiftData
 
 class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     // Show notifications even when app is in foreground
+    // .list ensures notifications persist in notification center after dismissal
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound, .badge])
+        completionHandler([.banner, .sound, .badge, .list])
     }
 
     // Handle notification tap - opens the app
@@ -192,6 +193,26 @@ class NotificationService {
 
         content.badge = NSNumber(value: needsAttentionCount)
         return content
+    }
+
+    // MARK: - Badge Management
+
+    /// Updates the app badge count independently of notifications
+    /// Call this when app becomes active or when reminder data changes
+    func updateBadgeCount(_ count: Int) async {
+        let status = await checkPermissionStatus()
+        guard status == .authorized else { return }
+
+        do {
+            try await notificationCenter.setBadgeCount(count)
+        } catch {
+            print("Failed to update badge count: \(error)")
+        }
+    }
+
+    /// Clears the app badge
+    func clearBadge() async {
+        await updateBadgeCount(0)
     }
 
     // MARK: - Update scheduled notification content
