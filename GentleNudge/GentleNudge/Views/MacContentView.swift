@@ -39,6 +39,26 @@ struct MacContentView: View {
         }
     }
 
+    // Needs attention grouped by category
+    private var needsAttentionByCategory: [(category: Category?, reminders: [Reminder])] {
+        var grouped: [UUID?: [Reminder]] = [:]
+        for reminder in needsAttentionReminders {
+            let key = reminder.category?.id
+            grouped[key, default: []].append(reminder)
+        }
+
+        var result: [(category: Category?, reminders: [Reminder])] = []
+        for category in categories {
+            if let reminders = grouped[category.id], !reminders.isEmpty {
+                result.append((category: category, reminders: reminders))
+            }
+        }
+        if let uncategorized = grouped[nil], !uncategorized.isEmpty {
+            result.append((category: nil, reminders: uncategorized))
+        }
+        return result
+    }
+
     private var habitReminders: [Reminder] {
         reminders.filter { $0.isHabit && !$0.isCompleted }
             .sorted { $0.title < $1.title }
@@ -280,13 +300,38 @@ struct MacContentView: View {
                     }
                 }
 
-                // Needs Attention Section
+                // Needs Attention Section - grouped by category
                 if !needsAttentionReminders.isEmpty {
                     MacSectionCard(title: "Needs Attention", icon: "exclamationmark.circle.fill", color: .red) {
-                        ForEach(needsAttentionReminders) { reminder in
-                            MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id, showSnooze: true) {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(needsAttentionByCategory.enumerated()), id: \.offset) { _, group in
+                                // Category header
+                                if let category = group.category {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: category.icon)
+                                            .font(.caption2)
+                                        Text(category.name)
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                    }
+                                    .foregroundStyle(category.color)
+                                    .padding(.top, 6)
+                                    .padding(.bottom, 2)
+                                } else {
+                                    Text("Uncategorized")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.top, 6)
+                                        .padding(.bottom, 2)
+                                }
+
+                                ForEach(group.reminders) { reminder in
+                                    MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id, showSnooze: true) {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
+                                        }
+                                    }
                                 }
                             }
                         }
