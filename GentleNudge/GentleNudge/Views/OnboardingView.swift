@@ -7,10 +7,25 @@ struct OnboardingView: View {
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
     @State private var currentPage = 0
+    @State private var selectedCategories: Set<String> = []
     @State private var selectedHabits: Set<String> = []
     @State private var selectedTasks: Set<String> = []
 
-    private let totalPages = 4
+    private let totalPages = 5
+
+    // Available categories with descriptions
+    private let categoryDescriptions: [(name: String, description: String, icon: String, color: String)] = [
+        ("Habits", "Daily routines and habits to build", "heart.circle.fill", "red"),
+        ("Today", "Things that need attention today", "sun.max.fill", "yellow"),
+        ("House", "Home maintenance and chores", "house.fill", "green"),
+        ("Photos", "Photo organization and projects", "photo.fill", "purple"),
+        ("Finance", "Bills, budgets, and money tasks", "dollarsign.circle.fill", "teal"),
+        ("To Read", "Books, articles, and reading list", "book.fill", "blue"),
+        ("Startup", "Business and side project ideas", "lightbulb.fill", "orange"),
+        ("Explore", "Places to visit and things to try", "safari.fill", "indigo"),
+        ("GenAI", "AI projects and experiments", "sparkles", "pink"),
+        ("Misc", "Everything else", "tray.fill", "mint"),
+    ]
 
     // Suggested habits for new users
     private let suggestedHabits: [(title: String, notes: String, icon: String)] = [
@@ -39,14 +54,17 @@ struct OnboardingView: View {
                 welcomePage
                     .tag(0)
 
-                habitsPage
+                categoriesPage
                     .tag(1)
 
-                tasksPage
+                habitsPage
                     .tag(2)
 
-                setupPage
+                tasksPage
                     .tag(3)
+
+                setupPage
+                    .tag(4)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut, value: currentPage)
@@ -154,6 +172,62 @@ struct OnboardingView: View {
                 Spacer(minLength: 40)
             }
             .padding()
+        }
+    }
+
+    private var categoriesPage: some View {
+        ScrollView {
+            VStack(spacing: Constants.Spacing.lg) {
+                Spacer(minLength: 20)
+
+                VStack(spacing: Constants.Spacing.sm) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 50))
+                        .foregroundStyle(.blue)
+
+                    Text("Choose Your Categories")
+                        .font(.title)
+                        .fontWeight(.bold)
+
+                    Text("Select the categories that fit your life. You can always add or remove them later.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+
+                VStack(spacing: Constants.Spacing.sm) {
+                    ForEach(categoryDescriptions, id: \.name) { category in
+                        CategorySelectableRow(
+                            name: category.name,
+                            description: category.description,
+                            icon: category.icon,
+                            colorName: category.color,
+                            isSelected: selectedCategories.contains(category.name)
+                        ) {
+                            if selectedCategories.contains(category.name) {
+                                selectedCategories.remove(category.name)
+                            } else {
+                                selectedCategories.insert(category.name)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal)
+
+                Text("Tip: Start with a few categories. Less is more!")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 40)
+            }
+            .padding()
+        }
+        .onAppear {
+            // Pre-select some common categories
+            if selectedCategories.isEmpty {
+                selectedCategories = ["Habits", "Today", "House", "Misc"]
+            }
         }
     }
 
@@ -275,6 +349,15 @@ struct OnboardingView: View {
                 }
 
                 VStack(alignment: .leading, spacing: Constants.Spacing.md) {
+                    if !selectedCategories.isEmpty {
+                        SummarySection(
+                            title: "Categories",
+                            icon: "folder.fill",
+                            color: .blue,
+                            items: Array(selectedCategories).sorted()
+                        )
+                    }
+
                     if !selectedHabits.isEmpty {
                         SummarySection(
                             title: "Habits",
@@ -288,13 +371,13 @@ struct OnboardingView: View {
                         SummarySection(
                             title: "Tasks",
                             icon: "checklist",
-                            color: .blue,
+                            color: .green,
                             items: Array(selectedTasks)
                         )
                     }
 
-                    if selectedHabits.isEmpty && selectedTasks.isEmpty {
-                        Text("No items selected - that's okay! You can add reminders anytime using the + button.")
+                    if selectedCategories.isEmpty && selectedHabits.isEmpty && selectedTasks.isEmpty {
+                        Text("No items selected - that's okay! You can customize everything later in Settings.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .padding()
@@ -343,8 +426,16 @@ struct OnboardingView: View {
     // MARK: - Actions
 
     private func finishOnboarding() {
-        // Create selected habits
-        if let habitsCategory = categories.first(where: { $0.name == "Habits" }) {
+        // Delete categories that weren't selected
+        for category in categories {
+            if !selectedCategories.contains(category.name) {
+                modelContext.delete(category)
+            }
+        }
+
+        // Create selected habits (only if Habits category was selected)
+        if selectedCategories.contains("Habits"),
+           let habitsCategory = categories.first(where: { $0.name == "Habits" }) {
             for habitTitle in selectedHabits {
                 if let habit = suggestedHabits.first(where: { $0.title == habitTitle }) {
                     let reminder = Reminder(
@@ -360,9 +451,10 @@ struct OnboardingView: View {
             }
         }
 
-        // Create selected tasks
+        // Create selected tasks (only if their category was selected)
         for taskTitle in selectedTasks {
             if let task = suggestedTasks.first(where: { $0.title == taskTitle }),
+               selectedCategories.contains(task.category),
                let category = categories.first(where: { $0.name == task.category }) {
                 let reminder = Reminder(
                     title: task.title,
@@ -495,6 +587,70 @@ private struct TipRow: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct CategorySelectableRow: View {
+    let name: String
+    let description: String
+    let icon: String
+    let colorName: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    private var color: Color {
+        switch colorName {
+        case "red": return .red
+        case "yellow": return .yellow
+        case "green": return .green
+        case "purple": return .purple
+        case "teal": return .teal
+        case "blue": return .blue
+        case "orange": return .orange
+        case "indigo": return .indigo
+        case "pink": return .pink
+        case "mint": return .mint
+        default: return .gray
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Constants.Spacing.md) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? .white : color)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle()
+                            .fill(isSelected ? color : color.opacity(0.15))
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(.body)
+                        .fontWeight(.medium)
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(isSelected ? color : .secondary)
+            }
+            .padding()
+            .background(isSelected ? color.opacity(0.1) : AppColors.secondaryBackground)
+            .foregroundStyle(.primary)
+            .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+            .overlay(
+                RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
+                    .stroke(isSelected ? color : .clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
