@@ -6,6 +6,9 @@ struct ContentView: View {
     @Query private var reminders: [Reminder]
     @State private var selectedTab = 0
     @State private var showingAddReminder = false
+    @State private var showingOnboarding = false
+
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     private var needsAttentionCount: Int {
         reminders.filter { reminder in
@@ -62,6 +65,17 @@ struct ContentView: View {
         .sheet(isPresented: $showingAddReminder) {
             AddReminderView()
         }
+        #if os(iOS)
+        .sheet(isPresented: $showingOnboarding) {
+            OnboardingView()
+        }
+        .onAppear {
+            // Show onboarding for first-time users
+            if !hasCompletedOnboarding {
+                showingOnboarding = true
+            }
+        }
+        #endif
         .task {
             // Perform daily backup on app launch
             do {

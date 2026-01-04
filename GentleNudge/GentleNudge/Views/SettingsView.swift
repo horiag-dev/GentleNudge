@@ -33,6 +33,9 @@ struct SettingsView: View {
     @State private var isTestingNotification = false
     #endif
 
+    @State private var showingOnboarding = false
+    @State private var showAdvancedSettings = false
+
     enum SyncStatus {
         case idle
         case syncing
@@ -43,13 +46,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Import Section
+                // MARK: - Get Started (iOS only)
+                #if os(iOS)
                 Section {
                     Button {
-                        showingImport = true
+                        showingOnboarding = true
                     } label: {
                         HStack {
-                            Label("Import from Apple Reminders", systemImage: "square.and.arrow.down")
+                            Label("Get Started Guide", systemImage: "book.fill")
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
@@ -57,13 +61,12 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("Import")
+                    Text("Welcome")
                 } footer: {
-                    Text("Import reminders due today from Apple Reminders. AI will analyze and categorize them automatically.")
+                    Text("New to Gentle Nudge? Learn how to use the app and set up your first habits and reminders.")
                 }
 
-                // Morning Notification (iOS only)
-                #if os(iOS)
+                // MARK: - Morning Notification
                 Section {
                     Toggle(isOn: $notificationsEnabled) {
                         Label("Morning Summary", systemImage: "bell.badge.fill")
@@ -122,135 +125,6 @@ struct SettingsView: View {
                     Text("Get a morning reminder of items that need attention. The notification shows overdue items, items due today, and high priority tasks.")
                 }
                 #endif
-
-                // iCloud Sync
-                Section {
-                    HStack {
-                        Label("Storage Mode", systemImage: "externaldrive.fill")
-                        Spacer()
-                        Text(AppState.shared.storageMode.rawValue)
-                            .foregroundStyle(AppState.shared.storageMode == .cloudKit ? .green : .orange)
-                    }
-
-                    HStack {
-                        Label("iCloud Account", systemImage: "icloud.fill")
-                        Spacer()
-                        if FileManager.default.ubiquityIdentityToken != nil {
-                            Text("Signed In")
-                                .foregroundStyle(.green)
-                        } else {
-                            Text("Not signed in")
-                                .foregroundStyle(.red)
-                        }
-                    }
-
-                    HStack {
-                        Text("Reminders in database")
-                        Spacer()
-                        Text("\(reminders.count)")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("Categories")
-                        Spacer()
-                        Text("\(categories.count)")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button {
-                        forceiCloudSync()
-                    } label: {
-                        HStack {
-                            Label("Force Sync", systemImage: "arrow.triangle.2.circlepath.icloud")
-                            Spacer()
-                            if iCloudSyncStatus == .syncing {
-                                ProgressView()
-                            } else if iCloudSyncStatus == .success {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                            }
-                        }
-                    }
-                    .disabled(iCloudSyncStatus == .syncing)
-
-                    if let lastSync = lastSyncTime {
-                        HStack {
-                            Text("Last sync")
-                            Spacer()
-                            Text(lastSync.formatted(date: .omitted, time: .shortened))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Button {
-                        migrateToiCloud()
-                    } label: {
-                        HStack {
-                            Label("Migrate Local Data to iCloud", systemImage: "icloud.and.arrow.up")
-                            Spacer()
-                            if isMigrating {
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(isMigrating)
-
-                    Button(role: .destructive) {
-                        resetCloudKitSync()
-                    } label: {
-                        Label("Reset Sync State", systemImage: "arrow.counterclockwise.icloud")
-                    }
-                } header: {
-                    Text("iCloud")
-                } footer: {
-                    Text("Force Sync pushes changes. Reset Sync clears the local sync token if sync gets stuck (data is preserved).")
-                }
-
-                // Apple Reminders Sync
-                Section {
-                    HStack {
-                        Label("Apple Reminders", systemImage: "checkmark.circle.fill")
-                        Spacer()
-                        switch AppleRemindersService.shared.checkAuthorizationStatus() {
-                        case .authorized:
-                            Text("Connected")
-                                .foregroundStyle(.green)
-                        case .denied:
-                            Text("Denied")
-                                .foregroundStyle(.red)
-                        case .notDetermined:
-                            Text("Not Set")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Button {
-                        requestRemindersAccess()
-                    } label: {
-                        Label("Grant Access", systemImage: "lock.open.fill")
-                    }
-
-                    Button {
-                        syncToAppleReminders()
-                    } label: {
-                        HStack {
-                            Label("Sync All to Apple Reminders", systemImage: "arrow.triangle.2.circlepath")
-                            Spacer()
-                            if syncStatus == .syncing {
-                                ProgressView()
-                            } else if syncStatus == .success {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                            }
-                        }
-                    }
-                    .disabled(syncStatus == .syncing)
-                } header: {
-                    Text("Backup")
-                } footer: {
-                    Text("Sync your reminders to Apple's built-in Reminders app as a backup. A list called '\(Constants.appleRemindersListName)' will be created.")
-                }
 
                 // AI Settings
                 Section {
@@ -312,6 +186,183 @@ struct SettingsView: View {
                     StatRow(title: "Overdue", value: "\(reminders.filter { $0.isOverdue }.count)")
                     StatRow(title: "AI Enhanced", value: "\(reminders.filter { $0.aiEnhancedDescription != nil }.count)")
                 }
+
+                // About
+                Section("About") {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text("1.2.0")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Built with")
+                        Spacer()
+                        Text("SwiftUI + Claude AI")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // MARK: - Advanced Settings
+                Section {
+                    DisclosureGroup(isExpanded: $showAdvancedSettings) {
+                        // Content will be inside
+                    } label: {
+                        Label("Advanced Settings", systemImage: "gearshape.2.fill")
+                    }
+                } footer: {
+                    Text("Sync, backup, import, and data management options.")
+                }
+
+                if showAdvancedSettings {
+                    // Import Section
+                    Section {
+                        Button {
+                            showingImport = true
+                        } label: {
+                            HStack {
+                                Label("Import from Apple Reminders", systemImage: "square.and.arrow.down")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    } header: {
+                        Text("Import")
+                    } footer: {
+                        Text("Import reminders due today from Apple Reminders. AI will analyze and categorize them automatically.")
+                    }
+
+                    // iCloud Sync
+                    Section {
+                        HStack {
+                            Label("Storage Mode", systemImage: "externaldrive.fill")
+                            Spacer()
+                            Text(AppState.shared.storageMode.rawValue)
+                                .foregroundStyle(AppState.shared.storageMode == .cloudKit ? .green : .orange)
+                        }
+
+                        HStack {
+                            Label("iCloud Account", systemImage: "icloud.fill")
+                            Spacer()
+                            if FileManager.default.ubiquityIdentityToken != nil {
+                                Text("Signed In")
+                                    .foregroundStyle(.green)
+                            } else {
+                                Text("Not signed in")
+                                    .foregroundStyle(.red)
+                            }
+                        }
+
+                        HStack {
+                            Text("Reminders in database")
+                            Spacer()
+                            Text("\(reminders.count)")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        HStack {
+                            Text("Categories")
+                            Spacer()
+                            Text("\(categories.count)")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Button {
+                            forceiCloudSync()
+                        } label: {
+                            HStack {
+                                Label("Force Sync", systemImage: "arrow.triangle.2.circlepath.icloud")
+                                Spacer()
+                                if iCloudSyncStatus == .syncing {
+                                    ProgressView()
+                                } else if iCloudSyncStatus == .success {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                        }
+                        .disabled(iCloudSyncStatus == .syncing)
+
+                        if let lastSync = lastSyncTime {
+                            HStack {
+                                Text("Last sync")
+                                Spacer()
+                                Text(lastSync.formatted(date: .omitted, time: .shortened))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Button {
+                            migrateToiCloud()
+                        } label: {
+                            HStack {
+                                Label("Migrate Local Data to iCloud", systemImage: "icloud.and.arrow.up")
+                                Spacer()
+                                if isMigrating {
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(isMigrating)
+
+                        Button(role: .destructive) {
+                            resetCloudKitSync()
+                        } label: {
+                            Label("Reset Sync State", systemImage: "arrow.counterclockwise.icloud")
+                        }
+                    } header: {
+                        Text("iCloud")
+                    } footer: {
+                        Text("Force Sync pushes changes. Reset Sync clears the local sync token if sync gets stuck (data is preserved).")
+                    }
+
+                    // Apple Reminders Sync
+                    Section {
+                        HStack {
+                            Label("Apple Reminders", systemImage: "checkmark.circle.fill")
+                            Spacer()
+                            switch AppleRemindersService.shared.checkAuthorizationStatus() {
+                            case .authorized:
+                                Text("Connected")
+                                    .foregroundStyle(.green)
+                            case .denied:
+                                Text("Denied")
+                                    .foregroundStyle(.red)
+                            case .notDetermined:
+                                Text("Not Set")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Button {
+                            requestRemindersAccess()
+                        } label: {
+                            Label("Grant Access", systemImage: "lock.open.fill")
+                        }
+
+                        Button {
+                            syncToAppleReminders()
+                        } label: {
+                            HStack {
+                                Label("Sync All to Apple Reminders", systemImage: "arrow.triangle.2.circlepath")
+                                Spacer()
+                                if syncStatus == .syncing {
+                                    ProgressView()
+                                } else if syncStatus == .success {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                        }
+                        .disabled(syncStatus == .syncing)
+                    } header: {
+                        Text("Apple Reminders Backup")
+                    } footer: {
+                        Text("Sync your reminders to Apple's built-in Reminders app as a backup. A list called '\(Constants.appleRemindersListName)' will be created.")
+                    }
 
                 // Automatic Backups
                 Section {
@@ -395,23 +446,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Recover Recurring Tasks: If recurring reminders were completed without creating the next occurrence, this will recreate them.")
                 }
-
-                // About
-                Section("About") {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("1.1.0")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("Built with")
-                        Spacer()
-                        Text("SwiftUI + Claude AI")
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                } // End of showAdvancedSettings
             }
             #if os(macOS)
             .listStyle(.inset(alternatesRowBackgrounds: false))
@@ -446,6 +481,11 @@ struct SettingsView: View {
             .sheet(isPresented: $showingImport) {
                 ImportRemindersView()
             }
+            #if os(iOS)
+            .sheet(isPresented: $showingOnboarding) {
+                OnboardingView()
+            }
+            #endif
             .alert("Migration Result", isPresented: $showingMigrationAlert) {
                 Button("OK") {}
             } message: {
