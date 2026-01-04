@@ -34,6 +34,18 @@ struct GentleNudgeApp: App {
             cloudKitDatabase: .none
         )
 
+        // Helper to delete corrupted database if needed
+        func deleteLocalStore() {
+            let fileManager = FileManager.default
+            #if os(macOS)
+            if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                let storeURL = appSupport.appendingPathComponent("default.store")
+                try? fileManager.removeItem(at: storeURL)
+                print("Deleted local store for fresh start")
+            }
+            #endif
+        }
+
         do {
             // Try CloudKit configuration first
             let container = try ModelContainer(for: schema, configurations: [cloudKitConfig])
@@ -74,6 +86,10 @@ struct GentleNudgeApp: App {
                 print("NSError domain: \(nsError.domain), code: \(nsError.code)")
                 print("NSError userInfo: \(nsError.userInfo)")
             }
+
+            // If there's a migration issue, try deleting the local store
+            deleteLocalStore()
+
             do {
                 let container = try ModelContainer(for: schema, configurations: [localConfig])
                 print("Using local storage (CloudKit unavailable)")

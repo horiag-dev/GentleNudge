@@ -27,6 +27,28 @@ struct TodayView: View {
         }
     }
 
+    // Needs attention grouped by category
+    private var needsAttentionByCategory: [(category: Category?, reminders: [Reminder])] {
+        var grouped: [UUID?: [Reminder]] = [:]
+        for reminder in needsAttentionReminders {
+            let key = reminder.category?.id
+            grouped[key, default: []].append(reminder)
+        }
+
+        // Sort: categories first (by sortOrder), then uncategorized last
+        var result: [(category: Category?, reminders: [Reminder])] = []
+        for category in categories {
+            if let reminders = grouped[category.id], !reminders.isEmpty {
+                result.append((category: category, reminders: reminders))
+            }
+        }
+        // Add uncategorized at the end
+        if let uncategorized = grouped[nil], !uncategorized.isEmpty {
+            result.append((category: nil, reminders: uncategorized))
+        }
+        return result
+    }
+
     private func remindersForCategory(_ category: Category) -> [Reminder] {
         reminders.filter { reminder in
             guard reminder.category?.id == category.id,
@@ -87,7 +109,7 @@ struct TodayView: View {
                             HabitsSection(habits: habitReminders)
                         }
 
-                        // Urgent / Time-sensitive / High Priority
+                        // Urgent / Time-sensitive / High Priority - grouped by category
                         if !needsAttentionReminders.isEmpty {
                             VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
                                 HStack(spacing: Constants.Spacing.xs) {
@@ -97,9 +119,31 @@ struct TodayView: View {
                                         .font(.headline)
                                 }
 
-                                VStack(spacing: Constants.Spacing.xs) {
-                                    ForEach(needsAttentionReminders) { reminder in
-                                        NeedsAttentionRow(reminder: reminder)
+                                VStack(spacing: Constants.Spacing.md) {
+                                    ForEach(Array(needsAttentionByCategory.enumerated()), id: \.offset) { _, group in
+                                        VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
+                                            // Category header
+                                            if let category = group.category {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: category.icon)
+                                                        .font(.caption)
+                                                    Text(category.name)
+                                                        .font(.caption)
+                                                        .fontWeight(.medium)
+                                                }
+                                                .foregroundStyle(category.color)
+                                            } else {
+                                                Text("Uncategorized")
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                                    .foregroundStyle(.secondary)
+                                            }
+
+                                            // Reminders in this category
+                                            ForEach(group.reminders) { reminder in
+                                                NeedsAttentionRow(reminder: reminder)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -342,15 +386,36 @@ struct NeedsAttentionRow: View {
             .buttonStyle(.plain)
             .padding(.top, 2)
 
-            // Title
-            Text(reminder.title)
-                .font(.subheadline)
-                .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
-                .strikethrough(reminder.isCompleted)
-                .fixedSize(horizontal: false, vertical: true)
-                .onTapGesture {
-                    showingDetail = true
+            // Title and metadata
+            VStack(alignment: .leading, spacing: 2) {
+                Text(reminder.title)
+                    .font(.subheadline)
+                    .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
+                    .strikethrough(reminder.isCompleted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Due date and recurrence info (category shown in group header)
+                HStack(spacing: 6) {
+                    if let dueDate = reminder.dueDate {
+                        Text(formatDate(dueDate))
+                            .font(.caption2)
+                            .foregroundStyle(dateColor(dueDate))
+                    }
+
+                    if reminder.recurrence != .none {
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.trianglehead.2.clockwise")
+                                .font(.system(size: 8))
+                            Text(reminder.recurrence.label)
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                    }
                 }
+            }
+            .onTapGesture {
+                showingDetail = true
+            }
 
             Spacer()
 
@@ -386,6 +451,22 @@ struct NeedsAttentionRow: View {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
         // Set to 9 AM tomorrow
         reminder.dueDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow)
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return "Today"
+        }
+        if Calendar.current.isDateInTomorrow(date) {
+            return "Tomorrow"
+        }
+        return date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private func dateColor(_ date: Date) -> Color {
+        if date < Date() { return .red }
+        if Calendar.current.isDateInToday(date) { return .orange }
+        return .secondary
     }
 }
 

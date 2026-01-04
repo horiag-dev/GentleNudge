@@ -588,9 +588,12 @@ struct MacReminderRow: View {
 
     private func formatDate(_ date: Date) -> String {
         if Calendar.current.isDateInToday(date) {
-            return date.formatted(date: .omitted, time: .shortened)
+            return "Today"
         }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        if Calendar.current.isDateInTomorrow(date) {
+            return "Tomorrow"
+        }
+        return date.formatted(date: .abbreviated, time: .omitted)
     }
 
     private func dateColor(_ date: Date) -> Color {

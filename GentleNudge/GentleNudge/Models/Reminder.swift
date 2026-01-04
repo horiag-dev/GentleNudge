@@ -225,13 +225,13 @@ final class Reminder {
         guard let dueDate = dueDate else { return nil }
 
         if isDueToday {
-            return "Today, \(dueDate.formatted(date: .omitted, time: .shortened))"
+            return "Today"
         } else if isDueTomorrow {
-            return "Tomorrow, \(dueDate.formatted(date: .omitted, time: .shortened))"
+            return "Tomorrow"
         } else if isOverdue {
-            return "Overdue: \(dueDate.formatted(date: .abbreviated, time: .shortened))"
+            return "Overdue: \(dueDate.formatted(date: .abbreviated, time: .omitted))"
         } else {
-            return dueDate.formatted(date: .abbreviated, time: .shortened)
+            return dueDate.formatted(date: .abbreviated, time: .omitted)
         }
     }
 
