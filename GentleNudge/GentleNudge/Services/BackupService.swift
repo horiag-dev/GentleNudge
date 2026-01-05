@@ -91,6 +91,11 @@ actor BackupService {
                 item["categoryName"] = category.name
             }
 
+            // Include habit completion dates for habit tracking history
+            if !reminder.habitCompletionDates.isEmpty {
+                item["habitCompletionDates"] = reminder.habitCompletionDates.map { $0.timeIntervalSince1970 }
+            }
+
             backupData.append(item)
         }
 
