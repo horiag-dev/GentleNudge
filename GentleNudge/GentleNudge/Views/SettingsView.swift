@@ -35,6 +35,8 @@ struct SettingsView: View {
 
     @State private var showingOnboarding = false
     @State private var showAdvancedSettings = false
+    @State private var showingDebugInfo = false
+    @State private var debugInfoMessage = ""
 
     enum SyncStatus {
         case idle
@@ -441,6 +443,12 @@ struct SettingsView: View {
                     } label: {
                         Label("Recover Recurring Tasks", systemImage: "arrow.counterclockwise")
                     }
+
+                    Button {
+                        showSyncDebugInfo()
+                    } label: {
+                        Label("Debug Sync Status", systemImage: "ladybug")
+                    }
                 } header: {
                     Text("Data")
                 } footer: {
@@ -490,6 +498,11 @@ struct SettingsView: View {
                 Button("OK") {}
             } message: {
                 Text(migrationMessage)
+            }
+            .alert("Sync Debug Info", isPresented: $showingDebugInfo) {
+                Button("OK") {}
+            } message: {
+                Text(debugInfoMessage)
             }
             .fileExporter(
                 isPresented: $showingExporter,
@@ -775,6 +788,60 @@ struct SettingsView: View {
 
         try? modelContext.save()
         HapticManager.notification(.success)
+    }
+
+    private func showSyncDebugInfo() {
+        // Gather sync debug info
+        let totalReminders = reminders.count
+        let completedReminders = reminders.filter { $0.isCompleted }.count
+        let activeReminders = totalReminders - completedReminders
+        let habitsCount = reminders.filter { $0.isHabit }.count
+        let overdueCount = reminders.filter { $0.isOverdue }.count
+
+        // Check for potential issues
+        let categoriesCount = categories.count
+        var categoryNames = categories.map { $0.name }
+        let uniqueNames = Set(categoryNames)
+        let hasDuplicates = categoryNames.count != uniqueNames.count
+
+        // Check for reminders without categories
+        let orphanedReminders = reminders.filter { $0.category == nil }.count
+
+        // Build debug message
+        var message = """
+        Reminders: \(totalReminders) total
+        - Active: \(activeReminders)
+        - Completed: \(completedReminders)
+        - Habits: \(habitsCount)
+        - Overdue: \(overdueCount)
+        - No category: \(orphanedReminders)
+
+        Categories: \(categoriesCount)
+        """
+
+        if hasDuplicates {
+            message += "\n⚠️ DUPLICATE CATEGORIES DETECTED"
+            // Find duplicates
+            var seen: Set<String> = []
+            var duplicates: [String] = []
+            for name in categoryNames {
+                if seen.contains(name) {
+                    if !duplicates.contains(name) {
+                        duplicates.append(name)
+                    }
+                }
+                seen.insert(name)
+            }
+            message += "\nDuplicates: \(duplicates.joined(separator: ", "))"
+        }
+
+        message += "\n\nStorage: \(AppState.shared.storageMode.rawValue)"
+        message += "\niCloud: \(FileManager.default.ubiquityIdentityToken != nil ? "Signed In" : "Not Signed In")"
+        message += "\nOnboarding done: \(UserDefaults.standard.bool(forKey: "hasCompletedOnboarding"))"
+        message += "\nDefaults created: \(UserDefaults.standard.bool(forKey: "hasCreatedDefaultCategories"))"
+
+        debugInfoMessage = message
+        showingDebugInfo = true
     }
 
     private func resetCloudKitSync() {

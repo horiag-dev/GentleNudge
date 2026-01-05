@@ -426,12 +426,10 @@ struct OnboardingView: View {
     // MARK: - Actions
 
     private func finishOnboarding() {
-        // Delete categories that weren't selected
-        for category in categories {
-            if !selectedCategories.contains(category.name) {
-                modelContext.delete(category)
-            }
-        }
+        // Note: We no longer delete categories here because with CloudKit sync,
+        // deleted categories will sync back from other devices.
+        // Instead, users can manually delete unwanted categories later.
+        // The selected categories are used to determine which habits/tasks to create.
 
         // Create selected habits (only if Habits category was selected)
         if selectedCategories.contains("Habits"),
