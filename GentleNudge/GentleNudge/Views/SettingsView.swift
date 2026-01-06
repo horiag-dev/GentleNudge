@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import CloudKit
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -37,6 +38,9 @@ struct SettingsView: View {
     @State private var showAdvancedSettings = false
     @State private var showingDebugInfo = false
     @State private var debugInfoMessage = ""
+    @State private var isPullingFromiCloud = false
+    @State private var showingiCloudData = false
+    @State private var iCloudDataMessage = ""
 
     enum SyncStatus {
         case idle
@@ -273,20 +277,36 @@ struct SettingsView: View {
                         }
 
                         Button {
-                            forceiCloudSync()
+                            pushToiCloud()
                         } label: {
                             HStack {
-                                Label("Force Sync", systemImage: "arrow.triangle.2.circlepath.icloud")
+                                Label("Push to iCloud", systemImage: "icloud.and.arrow.up")
                                 Spacer()
                                 if iCloudSyncStatus == .syncing {
                                     ProgressView()
-                                } else if iCloudSyncStatus == .success {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.green)
                                 }
                             }
                         }
                         .disabled(iCloudSyncStatus == .syncing)
+
+                        Button {
+                            pullFromiCloud()
+                        } label: {
+                            HStack {
+                                Label("Pull from iCloud", systemImage: "icloud.and.arrow.down")
+                                Spacer()
+                                if isPullingFromiCloud {
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(isPullingFromiCloud)
+
+                        Button {
+                            viewiCloudData()
+                        } label: {
+                            Label("View iCloud Data", systemImage: "eye")
+                        }
 
                         if let lastSync = lastSyncTime {
                             HStack {
@@ -301,7 +321,7 @@ struct SettingsView: View {
                             migrateToiCloud()
                         } label: {
                             HStack {
-                                Label("Migrate Local Data to iCloud", systemImage: "icloud.and.arrow.up")
+                                Label("Migrate Local Data to iCloud", systemImage: "square.and.arrow.up.on.square")
                                 Spacer()
                                 if isMigrating {
                                     ProgressView()
@@ -318,7 +338,7 @@ struct SettingsView: View {
                     } header: {
                         Text("iCloud")
                     } footer: {
-                        Text("Force Sync pushes changes. Reset Sync clears the local sync token if sync gets stuck (data is preserved).")
+                        Text("Push: Upload local data to iCloud. Pull: Re-download from iCloud (resets local sync state). View: See what's stored in iCloud.")
                     }
 
                     // Apple Reminders Sync
@@ -503,6 +523,11 @@ struct SettingsView: View {
                 Button("OK") {}
             } message: {
                 Text(debugInfoMessage)
+            }
+            .alert("iCloud Data", isPresented: $showingiCloudData) {
+                Button("OK") {}
+            } message: {
+                Text(iCloudDataMessage)
             }
             .fileExporter(
                 isPresented: $showingExporter,
@@ -872,6 +897,10 @@ struct SettingsView: View {
     }
 
     private func forceiCloudSync() {
+        pushToiCloud()
+    }
+
+    private func pushToiCloud() {
         iCloudSyncStatus = .syncing
 
         Task {
@@ -886,10 +915,15 @@ struct SettingsView: View {
                     reminder.hasBeenSynced = true
                 }
 
+                // Touch all categories too
+                for category in categories {
+                    category.sortOrder = category.sortOrder // Touch to mark dirty
+                }
+
                 try modelContext.save()
 
                 // Small delay to allow CloudKit to process
-                try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
 
                 await MainActor.run {
                     iCloudSyncStatus = .success
@@ -912,6 +946,108 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private func pullFromiCloud() {
+        isPullingFromiCloud = true
+
+        Task {
+            // Reset the sync state to force a full re-download from CloudKit
+            // This is similar to resetCloudKitSync but provides feedback
+            do {
+                // Post notification to reset sync
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("NSCloudKitMirroringDelegateWillResetSyncNotificationName"),
+                    object: nil,
+                    userInfo: ["reason": "ForcePull"]
+                )
+
+                // Wait for sync to process
+                try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+
+                await MainActor.run {
+                    isPullingFromiCloud = false
+                    lastSyncTime = Date()
+                    HapticManager.notification(.success)
+                }
+            } catch {
+                await MainActor.run {
+                    isPullingFromiCloud = false
+                    HapticManager.notification(.error)
+                }
+            }
+        }
+    }
+
+    private func viewiCloudData() {
+        Task {
+            await fetchiCloudData()
+        }
+    }
+
+    @MainActor
+    private func fetchiCloudData() async {
+        // Query CloudKit directly to see what's stored
+        let container = CKContainer(identifier: "iCloud.com.horiag.GentleNudge")
+        let database = container.privateCloudDatabase
+
+        var message = "iCloud Data Summary:\n\n"
+
+        do {
+            // Query for Reminder records
+            let reminderQuery = CKQuery(recordType: "CD_Reminder", predicate: NSPredicate(value: true))
+            let reminderResults = try await database.records(matching: reminderQuery)
+            let reminderCount = reminderResults.matchResults.count
+
+            // Count completed vs active
+            var completedCount = 0
+            var activeCount = 0
+            for (_, result) in reminderResults.matchResults {
+                if case .success(let record) = result {
+                    if let isCompleted = record["CD_isCompleted"] as? Int64, isCompleted == 1 {
+                        completedCount += 1
+                    } else {
+                        activeCount += 1
+                    }
+                }
+            }
+
+            message += "Reminders: \(reminderCount) total\n"
+            message += "  - Active: \(activeCount)\n"
+            message += "  - Completed: \(completedCount)\n\n"
+
+            // Query for Category records
+            let categoryQuery = CKQuery(recordType: "CD_Category", predicate: NSPredicate(value: true))
+            let categoryResults = try await database.records(matching: categoryQuery)
+            let categoryCount = categoryResults.matchResults.count
+
+            // Get category names
+            var categoryNames: [String] = []
+            for (_, result) in categoryResults.matchResults {
+                if case .success(let record) = result {
+                    if let name = record["CD_name"] as? String {
+                        categoryNames.append(name)
+                    }
+                }
+            }
+
+            message += "Categories: \(categoryCount)\n"
+            message += "Names: \(categoryNames.sorted().joined(separator: ", "))\n\n"
+
+            // Check for duplicates
+            let uniqueNames = Set(categoryNames)
+            if categoryNames.count != uniqueNames.count {
+                message += "⚠️ DUPLICATES DETECTED in iCloud!\n"
+            }
+
+            message += "Local: \(reminders.count) reminders, \(categories.count) categories"
+
+        } catch {
+            message = "Failed to query iCloud:\n\(error.localizedDescription)"
+        }
+
+        iCloudDataMessage = message
+        showingiCloudData = true
     }
 
     private func migrateToiCloud() {
