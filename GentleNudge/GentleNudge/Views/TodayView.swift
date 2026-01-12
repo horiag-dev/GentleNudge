@@ -12,18 +12,34 @@ struct TodayView: View {
             .sorted { $0.title < $1.title }
     }
 
-    // Urgent: Items due today, overdue, or high priority
+    // Needs Attention: Only overdue or due today
     private var needsAttentionReminders: [Reminder] {
         reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            // Include: overdue, due today, or high priority
-            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
+            // Only include: overdue or due today
+            return reminder.isOverdue || reminder.isDueToday
         }
         .sorted { r1, r2 in
-            // Overdue first, then due today, then high priority
+            // Overdue first, then due today, then by priority
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
             if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
             return r1.priority.rawValue > r2.priority.rawValue
+        }
+    }
+
+    // Upcoming: Items due in the next 2 days (tomorrow or day after)
+    private var upcomingReminders: [Reminder] {
+        reminders.filter { reminder in
+            guard !reminder.isHabit, !reminder.isCompleted else { return false }
+            guard let daysUntil = reminder.daysUntilDue else { return false }
+            // Due in 1-2 days (tomorrow or day after tomorrow)
+            return daysUntil >= 1 && daysUntil <= 2
+        }
+        .sorted { r1, r2 in
+            // Sort by due date (soonest first)
+            let d1 = r1.dueDate ?? .distantFuture
+            let d2 = r2.dueDate ?? .distantFuture
+            return d1 < d2
         }
     }
 
@@ -54,9 +70,10 @@ struct TodayView: View {
             guard reminder.category?.id == category.id,
                   !reminder.isCompleted,
                   !reminder.isHabit else { return false }
-            // Exclude items already in Needs Attention
-            let inNeedsAttention = reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
-            return !inNeedsAttention
+            // Exclude items in Needs Attention or Upcoming
+            let inNeedsAttention = reminder.isOverdue || reminder.isDueToday
+            let inUpcoming = (reminder.daysUntilDue ?? 999) >= 1 && (reminder.daysUntilDue ?? 999) <= 2
+            return !inNeedsAttention && !inUpcoming
         }
         .sorted { $0.priority.rawValue > $1.priority.rawValue }
     }
@@ -151,6 +168,31 @@ struct TodayView: View {
                             .background(
                                 RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
                                     .fill(Color.red.opacity(0.08))
+                            )
+                        }
+
+                        // Upcoming - due in the next 7 days
+                        if !upcomingReminders.isEmpty {
+                            VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
+                                HStack(spacing: Constants.Spacing.xs) {
+                                    Image(systemName: "calendar.badge.clock")
+                                        .foregroundStyle(.blue)
+                                    Text("Upcoming")
+                                        .font(.headline)
+                                    Spacer()
+                                    Text("\(upcomingReminders.count)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                ForEach(upcomingReminders) { reminder in
+                                    UpcomingReminderRow(reminder: reminder)
+                                }
+                            }
+                            .padding(Constants.Spacing.md)
+                            .background(
+                                RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
+                                    .fill(Color.blue.opacity(0.08))
                             )
                         }
 
@@ -323,7 +365,7 @@ struct HabitRow: View {
 
 #if os(iOS)
 struct HabitDetailSheet: View {
-    let habit: Reminder
+    @Bindable var habit: Reminder
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -334,9 +376,9 @@ struct HabitDetailSheet: View {
 
                     // Stats
                     VStack(spacing: Constants.Spacing.sm) {
-                        StatRow(title: "Last 7 days", value: "\(habit.completionCount(days: 7))/7")
-                        StatRow(title: "Last 30 days", value: "\(habit.completionCount(days: 30))/30")
-                        StatRow(title: "Total completions", value: "\(habit.habitCompletionDates.count)")
+                        HabitStatRow(title: "Last 7 days", value: "\(habit.completionCount(days: 7))/7")
+                        HabitStatRow(title: "Last 30 days", value: "\(habit.completionCount(days: 30))/30")
+                        HabitStatRow(title: "Total completions", value: "\(habit.habitCompletionDates.count)")
                     }
                     .padding()
                     .background(
@@ -360,7 +402,117 @@ struct HabitDetailSheet: View {
         .presentationDetents([.medium, .large])
     }
 }
+
+struct HabitStatRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
 #endif
+
+// MARK: - Upcoming Reminder Row
+
+struct UpcomingReminderRow: View {
+    @Environment(\.modelContext) private var modelContext
+    @Bindable var reminder: Reminder
+    @State private var showingDetail = false
+
+    private var daysUntilText: String {
+        guard let days = reminder.daysUntilDue else { return "" }
+        if days == 1 { return "Tomorrow" }
+        return "in \(days) days"
+    }
+
+    var body: some View {
+        HStack(spacing: Constants.Spacing.sm) {
+            // Completion toggle
+            Button {
+                withAnimation(Constants.Animation.spring) {
+                    HapticManager.impact(.medium)
+                    if reminder.isCompleted {
+                        reminder.markIncomplete()
+                    } else {
+                        completeReminder()
+                    }
+                }
+            } label: {
+                Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .foregroundStyle(reminder.isCompleted ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+
+            // Content
+            VStack(alignment: .leading, spacing: 2) {
+                Text(reminder.title)
+                    .font(.subheadline)
+                    .lineLimit(1)
+
+                HStack(spacing: Constants.Spacing.xs) {
+                    // Category
+                    if let category = reminder.category {
+                        HStack(spacing: 2) {
+                            Image(systemName: category.icon)
+                                .font(.system(size: 10))
+                            Text(category.name)
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(category.color)
+                    }
+
+                    // Due date
+                    Text(daysUntilText)
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+
+                    // Recurrence badge
+                    if reminder.isRecurring {
+                        RecurrenceBadge(recurrence: reminder.recurrence, compact: true)
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Priority indicator
+            if reminder.priority == .urgent {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(.vertical, Constants.Spacing.xs)
+        .padding(.horizontal, Constants.Spacing.xs)
+        .background(AppColors.background.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            showingDetail = true
+        }
+        .sheet(isPresented: $showingDetail) {
+            NavigationStack {
+                ReminderDetailView(reminder: reminder)
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    private func completeReminder() {
+        if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
+            modelContext.insert(nextReminder)
+        }
+        reminder.markCompleted()
+    }
+}
 
 // MARK: - Needs Attention Row
 

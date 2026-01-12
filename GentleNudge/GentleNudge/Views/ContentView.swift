@@ -10,11 +10,43 @@ struct ContentView: View {
 
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
-    private var needsAttentionCount: Int {
+    private var needsAttentionItems: [Reminder] {
         reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
-        }.count
+            // Only overdue or due today (not urgent-only items)
+            return reminder.isOverdue || reminder.isDueToday
+        }
+    }
+
+    private var needsAttentionCount: Int {
+        needsAttentionItems.count
+    }
+
+    private var topItemTitles: [String] {
+        Array(needsAttentionItems.prefix(5).map { $0.title })
+    }
+
+    // For scheduling tomorrow's notification - what will need attention tomorrow?
+    private var tomorrowNeedsAttentionItems: [Reminder] {
+        let calendar = Calendar.current
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
+
+        return reminders.filter { reminder in
+            guard !reminder.isHabit, !reminder.isCompleted else { return false }
+            guard let dueDate = reminder.dueDate else { return false }
+
+            // Will be overdue tomorrow (due before tomorrow) or due tomorrow
+            let dueDay = calendar.startOfDay(for: dueDate)
+            return dueDay <= tomorrow
+        }
+    }
+
+    private var tomorrowNeedsAttentionCount: Int {
+        tomorrowNeedsAttentionItems.count
+    }
+
+    private var tomorrowTopItemTitles: [String] {
+        Array(tomorrowNeedsAttentionItems.prefix(5).map { $0.title })
     }
 
     var body: some View {
@@ -85,23 +117,42 @@ struct ContentView: View {
             }
 
             #if os(iOS)
-            // Update badge on launch
+            // Update badge and scheduled notification content on launch
             await NotificationService.shared.updateBadgeCount(needsAttentionCount)
+            NotificationService.shared.updateScheduledNotificationContent(
+                needsAttentionCount: needsAttentionCount,
+                topItems: topItemTitles
+            )
             #endif
         }
         #if os(iOS)
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                // Update badge when app becomes active
+                // Update badge and scheduled notification when app becomes active
                 Task {
                     await NotificationService.shared.updateBadgeCount(needsAttentionCount)
+                    NotificationService.shared.updateScheduledNotificationContent(
+                        needsAttentionCount: needsAttentionCount,
+                        topItems: topItemTitles
+                    )
                 }
+            } else if newPhase == .background {
+                // Update scheduled notification when app goes to background
+                // Use TOMORROW's data since the notification fires tomorrow morning
+                NotificationService.shared.updateScheduledNotificationContent(
+                    needsAttentionCount: tomorrowNeedsAttentionCount,
+                    topItems: tomorrowTopItemTitles
+                )
             }
         }
         .onChange(of: reminders) { _, _ in
-            // Update badge when reminders change
+            // Update badge and scheduled notification when reminders change
             Task {
                 await NotificationService.shared.updateBadgeCount(needsAttentionCount)
+                NotificationService.shared.updateScheduledNotificationContent(
+                    needsAttentionCount: needsAttentionCount,
+                    topItems: topItemTitles
+                )
             }
         }
         #endif

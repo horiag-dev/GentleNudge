@@ -30,7 +30,8 @@ struct MacContentView: View {
     private var needsAttentionReminders: [Reminder] {
         reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            return reminder.isOverdue || reminder.isDueToday || reminder.priority == .urgent
+            // Only overdue or due today (not urgent-only items)
+            return reminder.isOverdue || reminder.isDueToday
         }
         .sorted { r1, r2 in
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }

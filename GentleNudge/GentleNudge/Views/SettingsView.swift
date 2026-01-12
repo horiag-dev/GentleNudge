@@ -825,7 +825,7 @@ struct SettingsView: View {
 
         // Check for potential issues
         let categoriesCount = categories.count
-        var categoryNames = categories.map { $0.name }
+        let categoryNames = categories.map { $0.name }
         let uniqueNames = Set(categoryNames)
         let hasDuplicates = categoryNames.count != uniqueNames.count
 
@@ -988,62 +988,102 @@ struct SettingsView: View {
     @MainActor
     private func fetchiCloudData() async {
         // Query CloudKit directly to see what's stored
+        // Use zone-based fetching since SwiftData's schema doesn't have queryable fields
         let container = CKContainer(identifier: "iCloud.com.horiag.GentleNudge")
         let database = container.privateCloudDatabase
 
         var message = "iCloud Data Summary:\n\n"
 
         do {
-            // Query for Reminder records
-            let reminderQuery = CKQuery(recordType: "CD_Reminder", predicate: NSPredicate(value: true))
-            let reminderResults = try await database.records(matching: reminderQuery)
-            let reminderCount = reminderResults.matchResults.count
+            // First, get all record zones
+            let zones = try await database.allRecordZones()
 
-            // Count completed vs active
+            var totalReminders = 0
             var completedCount = 0
             var activeCount = 0
-            for (_, result) in reminderResults.matchResults {
-                if case .success(let record) = result {
-                    if let isCompleted = record["CD_isCompleted"] as? Int64, isCompleted == 1 {
-                        completedCount += 1
-                    } else {
-                        activeCount += 1
+            var categoryNames: [String] = []
+
+            // SwiftData uses a zone named "com.apple.coredata.cloudkit.zone"
+            // Skip the default zone as it doesn't support change tracking
+            let swiftDataZones = zones.filter { $0.zoneID.zoneName.contains("coredata") || $0.zoneID.zoneName.contains("cloudkit") }
+
+            if swiftDataZones.isEmpty {
+                // Try to find any non-default zone
+                let customZones = zones.filter { $0.zoneID.zoneName != "_defaultZone" }
+                if customZones.isEmpty {
+                    message += "No SwiftData zone found in iCloud.\n"
+                    message += "Available zones: \(zones.map { $0.zoneID.zoneName }.joined(separator: ", "))\n\n"
+                    message += "This may mean:\n"
+                    message += "- Data hasn't synced yet\n"
+                    message += "- CloudKit container isn't set up\n"
+                }
+            }
+
+            for zone in zones {
+                // Skip the default zone - it doesn't support getChanges
+                guard zone.zoneID.zoneName != "_defaultZone" else { continue }
+
+                // Fetch all records in this zone using changes API
+                let changes = try await database.recordZoneChanges(
+                    inZoneWith: zone.zoneID,
+                    since: nil
+                )
+
+                for modification in changes.modificationResultsByID {
+                    if case .success(let modificationResult) = modification.value {
+                        let record = modificationResult.record
+                        let recordType = record.recordType
+
+                        if recordType == "CD_Reminder" {
+                            totalReminders += 1
+                            if let isCompleted = record["CD_isCompleted"] as? Int64, isCompleted == 1 {
+                                completedCount += 1
+                            } else {
+                                activeCount += 1
+                            }
+                        } else if recordType == "CD_Category" {
+                            if let name = record["CD_name"] as? String {
+                                categoryNames.append(name)
+                            }
+                        }
                     }
                 }
             }
 
-            message += "Reminders: \(reminderCount) total\n"
+            // Show zone info
+            let zoneNames = zones.map { $0.zoneID.zoneName }
+            message += "CloudKit zones: \(zoneNames.joined(separator: ", "))\n\n"
+
+            message += "Reminders in iCloud: \(totalReminders)\n"
             message += "  - Active: \(activeCount)\n"
             message += "  - Completed: \(completedCount)\n\n"
 
-            // Query for Category records
-            let categoryQuery = CKQuery(recordType: "CD_Category", predicate: NSPredicate(value: true))
-            let categoryResults = try await database.records(matching: categoryQuery)
-            let categoryCount = categoryResults.matchResults.count
-
-            // Get category names
-            var categoryNames: [String] = []
-            for (_, result) in categoryResults.matchResults {
-                if case .success(let record) = result {
-                    if let name = record["CD_name"] as? String {
-                        categoryNames.append(name)
-                    }
-                }
+            message += "Categories in iCloud: \(categoryNames.count)\n"
+            if !categoryNames.isEmpty {
+                message += "Names: \(categoryNames.sorted().joined(separator: ", "))\n\n"
             }
-
-            message += "Categories: \(categoryCount)\n"
-            message += "Names: \(categoryNames.sorted().joined(separator: ", "))\n\n"
 
             // Check for duplicates
             let uniqueNames = Set(categoryNames)
             if categoryNames.count != uniqueNames.count {
-                message += "⚠️ DUPLICATES DETECTED in iCloud!\n"
+                message += "⚠️ DUPLICATES in iCloud!\n\n"
             }
 
-            message += "Local: \(reminders.count) reminders, \(categories.count) categories"
+            message += "Local data:\n"
+            message += "  - Reminders: \(reminders.count)\n"
+            message += "  - Categories: \(categories.count)"
+
+            // Show sync status
+            if totalReminders != reminders.count || categoryNames.count != categories.count {
+                message += "\n\n⚠️ Local and iCloud counts differ!"
+            }
 
         } catch {
-            message = "Failed to query iCloud:\n\(error.localizedDescription)"
+            message = "Failed to query iCloud:\n\(error.localizedDescription)\n\n"
+            message += "This may happen if:\n"
+            message += "- Not signed into iCloud\n"
+            message += "- No data synced yet\n"
+            message += "- Network issues"
         }
 
         iCloudDataMessage = message
