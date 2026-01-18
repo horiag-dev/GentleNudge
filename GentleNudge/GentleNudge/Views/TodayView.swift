@@ -43,28 +43,6 @@ struct TodayView: View {
         }
     }
 
-    // Needs attention grouped by category
-    private var needsAttentionByCategory: [(category: Category?, reminders: [Reminder])] {
-        var grouped: [UUID?: [Reminder]] = [:]
-        for reminder in needsAttentionReminders {
-            let key = reminder.category?.id
-            grouped[key, default: []].append(reminder)
-        }
-
-        // Sort: categories first (by sortOrder), then uncategorized last
-        var result: [(category: Category?, reminders: [Reminder])] = []
-        for category in categories {
-            if let reminders = grouped[category.id], !reminders.isEmpty {
-                result.append((category: category, reminders: reminders))
-            }
-        }
-        // Add uncategorized at the end
-        if let uncategorized = grouped[nil], !uncategorized.isEmpty {
-            result.append((category: nil, reminders: uncategorized))
-        }
-        return result
-    }
-
     private func remindersForCategory(_ category: Category) -> [Reminder] {
         reminders.filter { reminder in
             guard reminder.category?.id == category.id,
@@ -78,66 +56,83 @@ struct TodayView: View {
         .sorted { $0.priority.rawValue > $1.priority.rawValue }
     }
 
-    // Categories that have reminders (for jump bar)
-    private var categoriesWithReminders: [Category] {
-        categories.filter { category in
-            category.name != "Habits" && !remindersForCategory(category).isEmpty
+    @State private var searchText = ""
+
+    // Filter reminders based on search
+    private var searchFilteredHabits: [Reminder] {
+        if searchText.isEmpty { return habitReminders }
+        return habitReminders.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText) ||
+            $0.notes.localizedCaseInsensitiveContains(searchText)
         }
+    }
+
+    private var searchFilteredNeedsAttention: [Reminder] {
+        if searchText.isEmpty { return needsAttentionReminders }
+        return needsAttentionReminders.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText) ||
+            $0.notes.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    private var searchFilteredUpcoming: [Reminder] {
+        if searchText.isEmpty { return upcomingReminders }
+        return upcomingReminders.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText) ||
+            $0.notes.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    private func searchFilteredRemindersForCategory(_ category: Category) -> [Reminder] {
+        let categoryReminders = remindersForCategory(category)
+        if searchText.isEmpty { return categoryReminders }
+        return categoryReminders.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText) ||
+            $0.notes.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    // Needs attention grouped by category (filtered)
+    private var searchFilteredNeedsAttentionByCategory: [(category: Category?, reminders: [Reminder])] {
+        var grouped: [UUID?: [Reminder]] = [:]
+        for reminder in searchFilteredNeedsAttention {
+            let key = reminder.category?.id
+            grouped[key, default: []].append(reminder)
+        }
+
+        var result: [(category: Category?, reminders: [Reminder])] = []
+        for category in categories {
+            if let reminders = grouped[category.id], !reminders.isEmpty {
+                result.append((category: category, reminders: reminders))
+            }
+        }
+        if let uncategorized = grouped[nil], !uncategorized.isEmpty {
+            result.append((category: nil, reminders: uncategorized))
+        }
+        return result
     }
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: Constants.Spacing.sm) {
-                        // Category Jump Bar
-                        if !categoriesWithReminders.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: Constants.Spacing.sm) {
-                                    ForEach(categoriesWithReminders) { category in
-                                        Button {
-                                            withAnimation {
-                                                proxy.scrollTo(category.id, anchor: .top)
-                                            }
-                                            HapticManager.impact(.light)
-                                        } label: {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: category.icon)
-                                                    .font(.caption)
-                                                Text(category.name)
-                                                    .font(.caption)
-                                                    .fontWeight(.medium)
-                                            }
-                                            .padding(.horizontal, Constants.Spacing.sm)
-                                            .padding(.vertical, Constants.Spacing.xs)
-                                            .background(category.color.opacity(0.15))
-                                            .foregroundStyle(category.color)
-                                            .clipShape(Capsule())
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .padding(.horizontal, Constants.Spacing.xs)
+            ScrollView {
+                LazyVStack(spacing: Constants.Spacing.sm) {
+                    // Habits Section - Daily Checklist
+                    if !searchFilteredHabits.isEmpty {
+                        HabitsSection(habits: searchFilteredHabits)
+                    }
+
+                    // Urgent / Time-sensitive / High Priority - grouped by category
+                    if !searchFilteredNeedsAttention.isEmpty {
+                        VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
+                            HStack(spacing: Constants.Spacing.xs) {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .foregroundStyle(.red)
+                                Text("Needs Attention")
+                                    .font(.headline)
                             }
-                        }
 
-                        // Habits Section - Daily Checklist
-                        if !habitReminders.isEmpty {
-                            HabitsSection(habits: habitReminders)
-                        }
-
-                        // Urgent / Time-sensitive / High Priority - grouped by category
-                        if !needsAttentionReminders.isEmpty {
-                            VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                                HStack(spacing: Constants.Spacing.xs) {
-                                    Image(systemName: "exclamationmark.circle.fill")
-                                        .foregroundStyle(.red)
-                                    Text("Needs Attention")
-                                        .font(.headline)
-                                }
-
-                                VStack(spacing: Constants.Spacing.md) {
-                                    ForEach(Array(needsAttentionByCategory.enumerated()), id: \.offset) { _, group in
+                            VStack(spacing: Constants.Spacing.md) {
+                                ForEach(Array(searchFilteredNeedsAttentionByCategory.enumerated()), id: \.offset) { _, group in
                                         VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
                                             // Category header
                                             if let category = group.category {
@@ -171,21 +166,21 @@ struct TodayView: View {
                             )
                         }
 
-                        // Upcoming - due in the next 7 days
-                        if !upcomingReminders.isEmpty {
-                            VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                                HStack(spacing: Constants.Spacing.xs) {
-                                    Image(systemName: "calendar.badge.clock")
-                                        .foregroundStyle(.blue)
-                                    Text("Upcoming")
-                                        .font(.headline)
-                                    Spacer()
-                                    Text("\(upcomingReminders.count)")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
+                    // Upcoming - due in the next 2 days
+                    if !searchFilteredUpcoming.isEmpty {
+                        VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
+                            HStack(spacing: Constants.Spacing.xs) {
+                                Image(systemName: "calendar.badge.clock")
+                                    .foregroundStyle(.blue)
+                                Text("Upcoming")
+                                    .font(.headline)
+                                Spacer()
+                                Text("\(searchFilteredUpcoming.count)")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
 
-                                ForEach(upcomingReminders) { reminder in
+                            ForEach(searchFilteredUpcoming) { reminder in
                                     UpcomingReminderRow(reminder: reminder)
                                 }
                             }
@@ -196,26 +191,39 @@ struct TodayView: View {
                             )
                         }
 
-                        // Categories with reminders
-                        ForEach(categories.filter { $0.name != "Habits" }) { category in
-                            let categoryReminders = remindersForCategory(category)
-                            if !categoryReminders.isEmpty {
-                                HomeCategorySection(
-                                    category: category,
-                                    reminders: categoryReminders
-                                )
-                                .id(category.id)
-                            }
+                    // Categories with reminders
+                    ForEach(categories.filter { $0.name != "Habits" }) { category in
+                        let categoryReminders = searchFilteredRemindersForCategory(category)
+                        if !categoryReminders.isEmpty {
+                            HomeCategorySection(
+                                category: category,
+                                reminders: categoryReminders
+                            )
                         }
                     }
-                    .padding()
+
+                    // Empty state when searching
+                    if !searchText.isEmpty &&
+                       searchFilteredHabits.isEmpty &&
+                       searchFilteredNeedsAttention.isEmpty &&
+                       searchFilteredUpcoming.isEmpty &&
+                       categories.allSatisfy({ searchFilteredRemindersForCategory($0).isEmpty }) {
+                        ContentUnavailableView(
+                            "No Results",
+                            systemImage: "magnifyingglass",
+                            description: Text("No reminders match \"\(searchText)\"")
+                        )
+                        .padding(.top, Constants.Spacing.xl)
+                    }
                 }
+                .padding()
             }
             .background(AppColors.background)
             .navigationTitle("Gentle Nudge")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
             #endif
+            .searchable(text: $searchText, prompt: "Search reminders")
         }
     }
 }
