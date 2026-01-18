@@ -10,7 +10,6 @@ struct ReminderDetailView: View {
     @Bindable var reminder: Reminder
 
     @State private var isEnhancing = false
-    @State private var isSuggestingCategory = false
     @State private var showDeleteConfirmation = false
     @State private var hasDueDate: Bool = false
 
@@ -94,35 +93,52 @@ struct ReminderDetailView: View {
                     }
                 }
 
-                // AI Enhancement
-                VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                    HStack {
-                        Text("AI Context")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        AIEnhanceButton(isLoading: isEnhancing) {
-                            enhanceWithAI()
-                        }
-                    }
-
-                    if let aiDescription = reminder.aiEnhancedDescription, !aiDescription.isEmpty {
-                        HStack(alignment: .top, spacing: Constants.Spacing.sm) {
-                            Image(systemName: "sparkles")
+                // Polish (fix typos, extract link info)
+                if Constants.isAPIKeyConfigured {
+                    VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
+                        HStack {
+                            Button {
+                                polishWithAI()
+                            } label: {
+                                HStack(spacing: Constants.Spacing.xs) {
+                                    if isEnhancing {
+                                        ProgressView()
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: "wand.and.stars")
+                                    }
+                                    Text("Polish")
+                                }
+                                .font(.subheadline)
+                                .padding(.horizontal, Constants.Spacing.sm)
+                                .padding(.vertical, Constants.Spacing.xs)
+                                .background(Color.purple.opacity(0.15))
                                 .foregroundStyle(.purple)
-                            Text(aiDescription)
-                                .font(.body)
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isEnhancing)
+
+                            Spacer()
+
+                            Text("Fix typos & clarify")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            LinearGradient(
-                                colors: [.purple.opacity(0.1), .blue.opacity(0.1)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+
+                        // Show link info if extracted
+                        if let linkInfo = reminder.aiEnhancedDescription, !linkInfo.isEmpty {
+                            HStack(alignment: .top, spacing: Constants.Spacing.sm) {
+                                Image(systemName: "link.circle.fill")
+                                    .foregroundStyle(.blue)
+                                Text(linkInfo)
+                                    .font(.subheadline)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.blue.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+                        }
                     }
                 }
 
@@ -276,20 +292,27 @@ struct ReminderDetailView: View {
         }
     }
 
-    private func enhanceWithAI() {
+    private func polishWithAI() {
         guard !reminder.title.isEmpty else { return }
 
         isEnhancing = true
         Task {
             do {
-                let enhanced = try await ClaudeService.shared.enhanceReminder(
+                let polished = try await ClaudeService.shared.polishReminder(
                     title: reminder.title,
                     notes: reminder.notes
                 )
 
                 await MainActor.run {
                     withAnimation {
-                        reminder.aiEnhancedDescription = enhanced
+                        // Update title if it changed (typos fixed)
+                        if polished.title != reminder.title {
+                            reminder.title = polished.title
+                        }
+                        // Store link info if present
+                        if let linkInfo = polished.linkInfo {
+                            reminder.aiEnhancedDescription = linkInfo
+                        }
                     }
                     HapticManager.notification(.success)
                     isEnhancing = false
@@ -298,36 +321,6 @@ struct ReminderDetailView: View {
                 await MainActor.run {
                     isEnhancing = false
                     HapticManager.notification(.error)
-                }
-            }
-        }
-    }
-
-    private func suggestCategory() {
-        guard !reminder.title.isEmpty else { return }
-
-        isSuggestingCategory = true
-        Task {
-            do {
-                let categoryNames = categories.map { $0.name }
-                let suggestion = try await ClaudeService.shared.suggestCategory(
-                    title: reminder.title,
-                    notes: reminder.notes,
-                    existingCategories: categoryNames
-                )
-
-                await MainActor.run {
-                    if let category = categories.first(where: { $0.name.lowercased() == suggestion.lowercased() }) {
-                        withAnimation {
-                            reminder.category = category
-                        }
-                        HapticManager.notification(.success)
-                    }
-                    isSuggestingCategory = false
-                }
-            } catch {
-                await MainActor.run {
-                    isSuggestingCategory = false
                 }
             }
         }
