@@ -2,3 +2,6 @@
 # Xcode user data
 *.xcuserdata/
 xcuserdata/
+
+# Build artifacts
+build/

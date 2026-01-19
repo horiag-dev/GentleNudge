@@ -286,7 +286,10 @@ final class Reminder {
     func createNextOccurrence() -> Reminder? {
         guard isRecurring, let currentDueDate = dueDate else { return nil }
 
-        guard let nextDueDate = recurrence.nextDate(from: currentDueDate) else { return nil }
+        // Use the later of current due date or today to ensure next occurrence is in the future
+        // This prevents overdue recurring items from creating a next occurrence that's still due today
+        let baseDate = max(currentDueDate, Calendar.current.startOfDay(for: Date()))
+        guard let nextDueDate = recurrence.nextDate(from: baseDate) else { return nil }
 
         let nextReminder = Reminder(
             title: title,

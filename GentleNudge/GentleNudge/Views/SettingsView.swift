@@ -132,6 +132,23 @@ struct SettingsView: View {
                 }
                 #endif
 
+                // MARK: - Manage
+                Section {
+                    NavigationLink {
+                        AllRemindersView()
+                    } label: {
+                        Label("All Reminders", systemImage: "tray.full.fill")
+                    }
+
+                    NavigationLink {
+                        CategoriesView()
+                    } label: {
+                        Label("Categories", systemImage: "folder.fill")
+                    }
+                } header: {
+                    Text("Manage")
+                }
+
                 // AI Settings
                 Section {
                     HStack {
@@ -338,7 +355,7 @@ struct SettingsView: View {
                     } header: {
                         Text("iCloud")
                     } footer: {
-                        Text("Push: Upload local data to iCloud. Pull: Re-download from iCloud (resets local sync state). View: See what's stored in iCloud.")
+                        Text("Push: Upload local data to iCloud. Pull: Check iCloud sync status (sync is automatic). View: See what's stored in iCloud. Counts may differ temporarily during sync.")
                     }
 
                     // Apple Reminders Sync
@@ -952,18 +969,14 @@ struct SettingsView: View {
         isPullingFromiCloud = true
 
         Task {
-            // Reset the sync state to force a full re-download from CloudKit
-            // This is similar to resetCloudKitSync but provides feedback
+            // SwiftData with CloudKit syncs automatically - there's no public API to force a pull.
+            // We wait a few seconds to allow any pending sync to complete, then refresh the view.
             do {
-                // Post notification to reset sync
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("NSCloudKitMirroringDelegateWillResetSyncNotificationName"),
-                    object: nil,
-                    userInfo: ["reason": "ForcePull"]
-                )
+                // Wait for any pending sync operations
+                try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
 
-                // Wait for sync to process
-                try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                // Refresh the iCloud data view to show current state
+                await fetchiCloudData()
 
                 await MainActor.run {
                     isPullingFromiCloud = false

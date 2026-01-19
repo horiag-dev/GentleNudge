@@ -50,49 +50,34 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
-                TodayView()
-                    .tabItem {
-                        Label("Today", systemImage: "sun.max.fill")
-                    }
-                    .tag(0)
+        TabView(selection: $selectedTab) {
+            TodayView()
+                .tabItem {
+                    Label("Today", systemImage: "sparkles")
+                }
+                .tag(0)
 
-                AllRemindersView()
-                    .tabItem {
-                        Label("All", systemImage: "tray.full.fill")
-                    }
-                    .tag(1)
+            // Empty view for "New" tab - triggers sheet via onChange
+            Color.clear
+                .tabItem {
+                    Label("New", systemImage: "plus.app.fill")
+                }
+                .tag(1)
 
-                CategoriesView()
-                    .tabItem {
-                        Label("Categories", systemImage: "folder.fill")
-                    }
-                    .tag(2)
-
-                SettingsView()
-                    .tabItem {
-                        Label("Settings", systemImage: "gearshape.fill")
-                    }
-                    .tag(3)
-            }
-
-            // Floating add button
-            Button {
-                HapticManager.impact(.medium)
+            SettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape.fill")
+                }
+                .tag(2)
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == 1 {
+                // "New" tab selected - show add sheet and return to previous tab
+                HapticManager.impact(.light)
                 showingAddReminder = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 56, height: 56)
-                    .background(
-                        Circle()
-                            .fill(AppColors.accent)
-                            .shadow(color: AppColors.accent.opacity(0.4), radius: 8, y: 4)
-                    )
+                // Return to Today tab
+                selectedTab = 0
             }
-            .offset(y: -30)
         }
         .sheet(isPresented: $showingAddReminder) {
             AddReminderView()
