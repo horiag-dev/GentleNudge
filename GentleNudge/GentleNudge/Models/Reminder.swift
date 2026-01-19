@@ -51,17 +51,21 @@ enum RecurrenceType: Int, Codable, CaseIterable {
         case .daily:
             return calendar.date(byAdding: .day, value: 1, to: date)
         case .weekdays:
-            // Find next weekday (Mon-Fri)
-            var nextDate = calendar.date(byAdding: .day, value: 1, to: date)!
-            while calendar.isDateInWeekend(nextDate) {
-                nextDate = calendar.date(byAdding: .day, value: 1, to: nextDate)!
+            // Find next weekday (Mon-Fri) - max 7 iterations to find next weekday
+            guard var nextDate = calendar.date(byAdding: .day, value: 1, to: date) else { return nil }
+            for _ in 0..<7 {
+                if !calendar.isDateInWeekend(nextDate) { return nextDate }
+                guard let next = calendar.date(byAdding: .day, value: 1, to: nextDate) else { return nil }
+                nextDate = next
             }
             return nextDate
         case .weekends:
-            // Find next weekend day (Sat or Sun)
-            var nextDate = calendar.date(byAdding: .day, value: 1, to: date)!
-            while !calendar.isDateInWeekend(nextDate) {
-                nextDate = calendar.date(byAdding: .day, value: 1, to: nextDate)!
+            // Find next weekend day (Sat or Sun) - max 7 iterations to find next weekend
+            guard var nextDate = calendar.date(byAdding: .day, value: 1, to: date) else { return nil }
+            for _ in 0..<7 {
+                if calendar.isDateInWeekend(nextDate) { return nextDate }
+                guard let next = calendar.date(byAdding: .day, value: 1, to: nextDate) else { return nil }
+                nextDate = next
             }
             return nextDate
         case .weekly:
@@ -289,8 +293,11 @@ final class Reminder {
 
     /// Get completion count for the last N days
     func completionCount(days: Int) -> Int {
+        guard days > 0 else { return 0 }
         let calendar = Calendar.current
-        let startDate = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date()))!
+        guard let startDate = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date())) else {
+            return 0
+        }
         return habitCompletionDates.filter { $0 >= startDate }.count
     }
 

@@ -5,6 +5,8 @@ actor URLMetadataService {
     static let shared = URLMetadataService()
 
     private var cache: [URL: LinkMetadata] = [:]
+    private var cacheOrder: [URL] = []  // Track insertion order for LRU eviction
+    private let maxCacheSize = 100
 
     private init() {}
 
@@ -29,7 +31,14 @@ actor URLMetadataService {
             imageURL: metadata.imageProvider != nil ? url : nil
         )
 
+        // Evict oldest entries if cache is full
+        while cache.count >= maxCacheSize, let oldest = cacheOrder.first {
+            cache.removeValue(forKey: oldest)
+            cacheOrder.removeFirst()
+        }
+
         cache[url] = linkMetadata
+        cacheOrder.append(url)
         return linkMetadata
     }
 

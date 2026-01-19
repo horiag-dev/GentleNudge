@@ -346,15 +346,17 @@ struct CalendarMonthView: View {
         var currentDate = firstWeek.start
 
         // Get all days that should appear in the calendar grid
+        // Continue until we reach Sunday after month end (to complete the week)
         while currentDate < monthInterval.end || calendar.component(.weekday, from: currentDate) != 1 {
             if currentDate >= monthInterval.start && currentDate < monthInterval.end {
                 days.append(currentDate)
             } else {
                 days.append(nil) // Placeholder for days outside the month
             }
-            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
+            guard let nextDate = calendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
+            currentDate = nextDate
 
-            // Safety limit
+            // Safety limit (max 6 weeks)
             if days.count > 42 { break }
         }
 
