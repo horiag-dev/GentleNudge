@@ -577,7 +577,7 @@
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gentle Nudge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Gentle Nudge";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gentle Nudge Mac.app/Contents/MacOS/Gentle Nudge Mac";
 			};
 			name = Debug;
 		};
@@ -596,7 +596,7 @@
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gentle Nudge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Gentle Nudge";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Gentle Nudge Mac.app/Contents/MacOS/Gentle Nudge Mac";
 			};
 			name = Release;
 		};
@@ -823,6 +823,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				MARKETING_VERSION = 1.1;
@@ -831,7 +832,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GentleNudge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GentleNudge";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GentleNudge iOS.app/GentleNudge iOS";
 			};
 			name = Debug;
 		};
@@ -841,6 +842,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				MARKETING_VERSION = 1.1;
@@ -849,7 +851,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GentleNudge.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/GentleNudge";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GentleNudge iOS.app/GentleNudge iOS";
 			};
 			name = Release;
 		};
@@ -858,6 +860,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = Horia.GentleNudgeUITests;
@@ -874,6 +877,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = Horia.GentleNudgeUITests;
