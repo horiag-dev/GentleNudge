@@ -41,6 +41,9 @@ struct SettingsView: View {
     @State private var isPullingFromiCloud = false
     @State private var showingiCloudData = false
     @State private var iCloudDataMessage = ""
+    @State private var showingBackupAlert = false
+    @State private var backupAlertMessage = ""
+    @State private var backupAlertIsError = false
 
     enum SyncStatus {
         case idle
@@ -546,6 +549,11 @@ struct SettingsView: View {
             } message: {
                 Text(iCloudDataMessage)
             }
+            .alert(backupAlertIsError ? "Backup Failed" : "Backup Complete", isPresented: $showingBackupAlert) {
+                Button("OK") {}
+            } message: {
+                Text(backupAlertMessage)
+            }
             .fileExporter(
                 isPresented: $showingExporter,
                 document: exportDocument,
@@ -589,10 +597,16 @@ struct SettingsView: View {
                 try await BackupService.shared.performDailyBackup(reminders: reminders)
                 loadBackupList()
                 await MainActor.run {
+                    backupAlertMessage = "Backup created successfully with \(reminders.count) reminders."
+                    backupAlertIsError = false
+                    showingBackupAlert = true
                     HapticManager.notification(.success)
                 }
             } catch {
                 await MainActor.run {
+                    backupAlertMessage = "Backup failed: \(error.localizedDescription)"
+                    backupAlertIsError = true
+                    showingBackupAlert = true
                     HapticManager.notification(.error)
                 }
             }

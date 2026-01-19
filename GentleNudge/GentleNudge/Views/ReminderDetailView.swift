@@ -12,6 +12,8 @@ struct ReminderDetailView: View {
     @State private var isEnhancing = false
     @State private var showDeleteConfirmation = false
     @State private var hasDueDate: Bool = false
+    @State private var showingAIError = false
+    @State private var aiErrorMessage = ""
 
     var body: some View {
         ScrollView {
@@ -290,6 +292,11 @@ struct ReminderDetailView: View {
         } message: {
             Text("Are you sure you want to delete this reminder? This action cannot be undone.")
         }
+        .alert("Polish Failed", isPresented: $showingAIError) {
+            Button("OK") {}
+        } message: {
+            Text(aiErrorMessage)
+        }
     }
 
     private func polishWithAI() {
@@ -320,6 +327,8 @@ struct ReminderDetailView: View {
             } catch {
                 await MainActor.run {
                     isEnhancing = false
+                    aiErrorMessage = error.localizedDescription
+                    showingAIError = true
                     HapticManager.notification(.error)
                 }
             }
@@ -327,11 +336,7 @@ struct ReminderDetailView: View {
     }
 
     private func completeReminder() {
-        // If recurring, create next occurrence before marking complete
-        if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
-            modelContext.insert(nextReminder)
-        }
-        reminder.markCompleted()
+        reminder.complete(in: modelContext)
     }
 }
 

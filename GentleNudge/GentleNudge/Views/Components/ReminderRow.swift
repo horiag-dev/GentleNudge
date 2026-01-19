@@ -143,11 +143,7 @@ struct ReminderRow: View {
     }
 
     private func completeReminder() {
-        // If recurring, create next occurrence before marking complete
-        if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
-            modelContext.insert(nextReminder)
-        }
-        reminder.markCompleted()
+        reminder.complete(in: modelContext)
     }
 }
 

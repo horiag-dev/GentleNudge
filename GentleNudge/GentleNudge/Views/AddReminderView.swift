@@ -18,6 +18,8 @@ struct AddReminderView: View {
     @State private var isEnhancing = false
     @State private var aiContext = ""
     @State private var showingDatePicker = false
+    @State private var showingAIError = false
+    @State private var aiErrorMessage = ""
 
     // Quick date selection helpers
     private var isDateToday: Bool {
@@ -248,6 +250,11 @@ struct AddReminderView: View {
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
+            .alert("Polish Failed", isPresented: $showingAIError) {
+                Button("OK") {}
+            } message: {
+                Text(aiErrorMessage)
+            }
         }
     }
 
@@ -299,6 +306,8 @@ struct AddReminderView: View {
             } catch {
                 await MainActor.run {
                     isEnhancing = false
+                    aiErrorMessage = error.localizedDescription
+                    showingAIError = true
                     HapticManager.notification(.error)
                 }
             }

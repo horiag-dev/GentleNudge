@@ -30,6 +30,8 @@ actor ClaudeService {
         case networkError(Error)
         case invalidResponse
         case apiError(String)
+        case timeout
+        case rateLimited
 
         var errorDescription: String? {
             switch self {
@@ -41,9 +43,20 @@ actor ClaudeService {
                 return "Invalid response from Claude API"
             case .apiError(let message):
                 return "API error: \(message)"
+            case .timeout:
+                return "Request timed out. Please try again."
+            case .rateLimited:
+                return "Too many requests. Please wait a moment and try again."
             }
         }
     }
+
+    private lazy var urlSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15 // 15 second timeout
+        config.timeoutIntervalForResource = 20
+        return URLSession(configuration: config)
+    }()
 
     private func makeRequest(prompt: String, maxTokens: Int = 300) async throws -> String {
         guard Constants.isAPIKeyConfigured else {
@@ -68,10 +81,22 @@ actor ClaudeService {
 
         request.httpBody = try JSONEncoder().encode(apiRequest)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await urlSession.data(for: request)
+        } catch let error as URLError where error.code == .timedOut {
+            throw ClaudeError.timeout
+        } catch {
+            throw ClaudeError.networkError(error)
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClaudeError.invalidResponse
+        }
+
+        if httpResponse.statusCode == 429 {
+            throw ClaudeError.rateLimited
         }
 
         if httpResponse.statusCode != 200 {

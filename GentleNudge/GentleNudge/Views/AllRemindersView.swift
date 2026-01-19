@@ -390,10 +390,7 @@ struct RecurringReminderRow: View {
             // Completion toggle
             Button {
                 withAnimation {
-                    if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
-                        modelContext.insert(nextReminder)
-                    }
-                    reminder.markCompleted()
+                    reminder.complete(in: modelContext)
                 }
                 HapticManager.impact(.medium)
             } label: {

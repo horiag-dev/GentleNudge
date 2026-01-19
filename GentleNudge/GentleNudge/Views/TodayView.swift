@@ -6,110 +6,133 @@ struct TodayView: View {
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
-    // Habits - show all habits (they're never permanently completed)
-    private var habitReminders: [Reminder] {
-        reminders.filter { $0.isHabit && !$0.isCompleted }
-            .sorted { $0.title < $1.title }
-    }
+    // MARK: - Categorized Reminders (single-pass optimization)
 
-    // Needs Attention: Only overdue or due today
-    private var needsAttentionReminders: [Reminder] {
-        reminders.filter { reminder in
-            guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            // Only include: overdue or due today
-            return reminder.isOverdue || reminder.isDueToday
+    /// Categorizes all reminders in a single pass for better performance
+    private var categorizedReminders: (habits: [Reminder], needsAttention: [Reminder], upcoming: [Reminder], byCategory: [UUID: [Reminder]]) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        var habits: [Reminder] = []
+        var needsAttention: [Reminder] = []
+        var upcoming: [Reminder] = []
+        var byCategory: [UUID: [Reminder]] = [:]
+
+        for reminder in reminders {
+            // Skip completed
+            guard !reminder.isCompleted else { continue }
+
+            // Habits go to their own list
+            if reminder.isHabit {
+                habits.append(reminder)
+                continue
+            }
+
+            // Calculate days until due once
+            let daysUntil: Int?
+            if let dueDate = reminder.dueDate {
+                let due = calendar.startOfDay(for: dueDate)
+                daysUntil = calendar.dateComponents([.day], from: today, to: due).day
+            } else {
+                daysUntil = nil
+            }
+
+            let isOverdue = daysUntil.map { $0 < 0 } ?? false
+            let isDueToday = daysUntil == 0
+            let isUpcoming = daysUntil.map { $0 >= 1 && $0 <= 2 } ?? false
+
+            if isOverdue || isDueToday {
+                needsAttention.append(reminder)
+            } else if isUpcoming {
+                upcoming.append(reminder)
+            } else if let categoryId = reminder.category?.id {
+                byCategory[categoryId, default: []].append(reminder)
+            }
         }
-        .sorted { r1, r2 in
-            // Overdue first, then due today, then by priority
+
+        // Sort each list
+        habits.sort { $0.title < $1.title }
+        needsAttention.sort { r1, r2 in
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
             if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
             return r1.priority.rawValue > r2.priority.rawValue
         }
-    }
+        upcoming.sort { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+        for key in byCategory.keys {
+            byCategory[key]?.sort { $0.priority.rawValue > $1.priority.rawValue }
+        }
 
-    // Upcoming: Items due in the next 2 days (tomorrow or day after)
-    private var upcomingReminders: [Reminder] {
-        reminders.filter { reminder in
-            guard !reminder.isHabit, !reminder.isCompleted else { return false }
-            guard let daysUntil = reminder.daysUntilDue else { return false }
-            // Due in 1-2 days (tomorrow or day after tomorrow)
-            return daysUntil >= 1 && daysUntil <= 2
-        }
-        .sorted { r1, r2 in
-            // Sort by due date (soonest first)
-            let d1 = r1.dueDate ?? .distantFuture
-            let d2 = r2.dueDate ?? .distantFuture
-            return d1 < d2
-        }
-    }
-
-    private func remindersForCategory(_ category: Category) -> [Reminder] {
-        reminders.filter { reminder in
-            guard reminder.category?.id == category.id,
-                  !reminder.isCompleted,
-                  !reminder.isHabit else { return false }
-            // Exclude items in Needs Attention or Upcoming
-            let inNeedsAttention = reminder.isOverdue || reminder.isDueToday
-            let inUpcoming = (reminder.daysUntilDue ?? 999) >= 1 && (reminder.daysUntilDue ?? 999) <= 2
-            return !inNeedsAttention && !inUpcoming
-        }
-        .sorted { $0.priority.rawValue > $1.priority.rawValue }
+        return (habits, needsAttention, upcoming, byCategory)
     }
 
     @State private var searchText = ""
 
-    // Filter reminders based on search
-    private var searchFilteredHabits: [Reminder] {
-        if searchText.isEmpty { return habitReminders }
-        return habitReminders.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText) ||
-            $0.notes.localizedCaseInsensitiveContains(searchText)
-        }
-    }
+    // MARK: - Search Filtered Results (uses cached categorization)
 
-    private var searchFilteredNeedsAttention: [Reminder] {
-        if searchText.isEmpty { return needsAttentionReminders }
-        return needsAttentionReminders.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText) ||
-            $0.notes.localizedCaseInsensitiveContains(searchText)
-        }
-    }
+    /// All filtered data computed once, accessed via single property
+    private var filteredData: FilteredReminderData {
+        let cached = categorizedReminders
 
-    private var searchFilteredUpcoming: [Reminder] {
-        if searchText.isEmpty { return upcomingReminders }
-        return upcomingReminders.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText) ||
-            $0.notes.localizedCaseInsensitiveContains(searchText)
+        // Apply search filter
+        let filterBlock: (Reminder) -> Bool = searchText.isEmpty ? { _ in true } : { reminder in
+            reminder.title.localizedCaseInsensitiveContains(searchText) ||
+            reminder.notes.localizedCaseInsensitiveContains(searchText)
         }
-    }
 
-    private func searchFilteredRemindersForCategory(_ category: Category) -> [Reminder] {
-        let categoryReminders = remindersForCategory(category)
-        if searchText.isEmpty { return categoryReminders }
-        return categoryReminders.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText) ||
-            $0.notes.localizedCaseInsensitiveContains(searchText)
-        }
-    }
+        let habits = cached.habits.filter(filterBlock)
+        let needsAttention = cached.needsAttention.filter(filterBlock)
+        let upcoming = cached.upcoming.filter(filterBlock)
 
-    // Needs attention grouped by category (filtered)
-    private var searchFilteredNeedsAttentionByCategory: [(category: Category?, reminders: [Reminder])] {
+        // Group needs attention by category
         var grouped: [UUID?: [Reminder]] = [:]
-        for reminder in searchFilteredNeedsAttention {
-            let key = reminder.category?.id
-            grouped[key, default: []].append(reminder)
+        for reminder in needsAttention {
+            grouped[reminder.category?.id, default: []].append(reminder)
         }
 
-        var result: [(category: Category?, reminders: [Reminder])] = []
+        var needsAttentionByCategory: [(category: Category?, reminders: [Reminder])] = []
         for category in categories {
             if let reminders = grouped[category.id], !reminders.isEmpty {
-                result.append((category: category, reminders: reminders))
+                needsAttentionByCategory.append((category: category, reminders: reminders))
             }
         }
         if let uncategorized = grouped[nil], !uncategorized.isEmpty {
-            result.append((category: nil, reminders: uncategorized))
+            needsAttentionByCategory.append((category: nil, reminders: uncategorized))
         }
-        return result
+
+        // Filter category reminders
+        var byCategory: [UUID: [Reminder]] = [:]
+        for (key, value) in cached.byCategory {
+            let filtered = value.filter(filterBlock)
+            if !filtered.isEmpty {
+                byCategory[key] = filtered
+            }
+        }
+
+        return FilteredReminderData(
+            habits: habits,
+            needsAttention: needsAttention,
+            upcoming: upcoming,
+            needsAttentionByCategory: needsAttentionByCategory,
+            byCategory: byCategory
+        )
+    }
+
+    private struct FilteredReminderData {
+        let habits: [Reminder]
+        let needsAttention: [Reminder]
+        let upcoming: [Reminder]
+        let needsAttentionByCategory: [(category: Category?, reminders: [Reminder])]
+        let byCategory: [UUID: [Reminder]]
+    }
+
+    // Convenience accessors that use the cached filteredData
+    private var searchFilteredHabits: [Reminder] { filteredData.habits }
+    private var searchFilteredNeedsAttention: [Reminder] { filteredData.needsAttention }
+    private var searchFilteredUpcoming: [Reminder] { filteredData.upcoming }
+    private var searchFilteredNeedsAttentionByCategory: [(category: Category?, reminders: [Reminder])] { filteredData.needsAttentionByCategory }
+
+    private func searchFilteredRemindersForCategory(_ category: Category) -> [Reminder] {
+        filteredData.byCategory[category.id] ?? []
     }
 
     var body: some View {
@@ -515,10 +538,7 @@ struct UpcomingReminderRow: View {
     }
 
     private func completeReminder() {
-        if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
-            modelContext.insert(nextReminder)
-        }
-        reminder.markCompleted()
+        reminder.complete(in: modelContext)
     }
 }
 
@@ -605,11 +625,7 @@ struct NeedsAttentionRow: View {
     }
 
     private func completeReminder() {
-        // If recurring, create next occurrence before marking complete
-        if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
-            modelContext.insert(nextReminder)
-        }
-        reminder.markCompleted()
+        reminder.complete(in: modelContext)
     }
 
     private func snoozeToTomorrow() {

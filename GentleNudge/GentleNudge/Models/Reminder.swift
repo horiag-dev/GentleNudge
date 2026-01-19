@@ -181,7 +181,11 @@ final class Reminder {
         // Habits are never overdue
         guard !isHabit else { return false }
         guard let dueDate = dueDate, !isCompleted else { return false }
-        return dueDate < Date()
+        // Compare at day level - something due today is not overdue until tomorrow
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let due = calendar.startOfDay(for: dueDate)
+        return due < today
     }
 
     var isDueToday: Bool {
@@ -246,6 +250,15 @@ final class Reminder {
     func markIncomplete() {
         isCompleted = false
         completedAt = nil
+    }
+
+    /// Complete a reminder, handling recurring logic automatically.
+    /// For recurring reminders, creates the next occurrence before marking complete.
+    func complete(in modelContext: ModelContext) {
+        if isRecurring, let nextReminder = createNextOccurrence() {
+            modelContext.insert(nextReminder)
+        }
+        markCompleted()
     }
 
     /// For habits: just set completedAt without marking permanently complete

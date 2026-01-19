@@ -715,11 +715,7 @@ struct MacReminderRow: View {
     }
 
     private func completeReminder() {
-        // If recurring, create next occurrence before marking complete
-        if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
-            modelContext.insert(nextReminder)
-        }
-        reminder.markCompleted()
+        reminder.complete(in: modelContext)
     }
 
     private func snoozeToTomorrow() {
@@ -770,11 +766,7 @@ struct MacReminderDetailPanel: View {
                             if reminder.isCompleted {
                                 reminder.markIncomplete()
                             } else {
-                                // Create next occurrence for recurring reminders
-                                if reminder.isRecurring, let nextReminder = reminder.createNextOccurrence() {
-                                    modelContext.insert(nextReminder)
-                                }
-                                reminder.markCompleted()
+                                reminder.complete(in: modelContext)
                             }
                         }
                     } label: {
