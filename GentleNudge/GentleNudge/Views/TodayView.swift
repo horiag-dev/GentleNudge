@@ -363,14 +363,9 @@ struct HabitRow: View {
 
             // Streak indicator
             if currentStreak > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "flame.fill")
-                        .font(.caption2)
-                    Text("\(currentStreak)")
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                }
-                .foregroundStyle(.orange)
+                Image(systemName: "flame.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
             }
 
             #if os(iOS)

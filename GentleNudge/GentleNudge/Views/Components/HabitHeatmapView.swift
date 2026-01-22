@@ -460,10 +460,10 @@ struct HabitMiniHeatmap: View {
     let days: Int
 
     private let calendar = Calendar.current
-    private let squareSize: CGFloat = 5
+    private let squareSize: CGFloat = 4
     private let spacing: CGFloat = 1
 
-    init(habit: Reminder, days: Int = 7) {
+    init(habit: Reminder, days: Int = 14) {
         self.habit = habit
         self.days = days
     }
