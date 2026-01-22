@@ -374,8 +374,8 @@ struct HabitRow: View {
             }
 
             #if os(iOS)
-            // Mini heatmap (last 14 days)
-            HabitMiniHeatmap(habit: habit, days: 14)
+            // Mini heatmap (last 7 days)
+            HabitMiniHeatmap(habit: habit)
             #endif
         }
         .padding(.vertical, Constants.Spacing.xs)
