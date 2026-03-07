@@ -798,15 +798,22 @@ struct MacReminderDetailPanel: View {
 
                     Divider()
 
-                    // Category
+                    // Category (required)
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Category").font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text("Category").font(.caption).foregroundStyle(.secondary)
+                            if reminder.category == nil {
+                                Text("(required)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                            }
+                        }
                         FlowLayout(spacing: 6) {
                             ForEach(categories.filter { $0.name != "Habits" }) { category in
                                 CategoryPill(
                                     category: category,
                                     isSelected: reminder.category?.id == category.id,
-                                    action: { reminder.category = reminder.category?.id == category.id ? nil : category }
+                                    action: { reminder.category = category }
                                 )
                             }
                         }
@@ -816,26 +823,23 @@ struct MacReminderDetailPanel: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Due Date").font(.caption).foregroundStyle(.secondary)
                         if let dueDate = reminder.dueDate {
-                            DatePicker("", selection: Binding(get: { dueDate }, set: { reminder.dueDate = $0 }))
+                            DatePicker("", selection: Binding(get: { dueDate }, set: { reminder.dueDate = $0 }), displayedComponents: [.date])
                                 .labelsHidden()
                             Button("Remove", role: .destructive) { reminder.dueDate = nil }
                                 .font(.caption)
                         } else {
-                            Button("Add due date") {
-                                reminder.dueDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date.tomorrow)
-                            }
-                        }
-                    }
-
-                    // Priority
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Priority").font(.caption).foregroundStyle(.secondary)
-                        HStack(spacing: 6) {
-                            ForEach(ReminderPriority.allCases, id: \.self) { p in
-                                PriorityPill(priority: p, isSelected: reminder.priority == p) {
-                                    reminder.priority = p
+                            HStack(spacing: 6) {
+                                Button("Today") {
+                                    reminder.dueDate = Calendar.current.startOfDay(for: Date())
+                                }
+                                Button("Tomorrow") {
+                                    reminder.dueDate = Calendar.current.startOfDay(for: Date.tomorrow)
+                                }
+                                Button("Weekend") {
+                                    reminder.dueDate = Date.nextWeekend
                                 }
                             }
+                            .font(.caption)
                         }
                     }
 
@@ -885,30 +889,6 @@ struct CategoryPill: View {
             .padding(.vertical, 5)
             .background(isSelected ? category.color : category.color.opacity(0.15))
             .foregroundStyle(isSelected ? .white : category.color)
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-struct PriorityPill: View {
-    let priority: ReminderPriority
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 3) {
-                if let icon = priority.icon {
-                    Image(systemName: icon)
-                }
-                Text(priority.label)
-            }
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(isSelected ? (priority == .normal ? .gray : priority.color) : AppColors.secondaryBackground)
-            .foregroundStyle(isSelected ? .white : (priority == .normal ? .primary : priority.color))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)

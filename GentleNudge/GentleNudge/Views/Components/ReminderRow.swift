@@ -43,14 +43,8 @@ struct ReminderRow: View {
                         .strikethrough(reminder.isCompleted)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    // Priority, Date & Recurrence
+                    // Date & Recurrence
                     HStack(spacing: 6) {
-                        if let icon = reminder.priority.icon {
-                            Image(systemName: icon)
-                                .font(.caption2)
-                                .foregroundStyle(reminder.priority.color)
-                        }
-
                         if reminder.isDueToday {
                             Text("Today")
                                 .font(.caption2)

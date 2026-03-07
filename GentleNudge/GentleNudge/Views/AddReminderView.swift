@@ -11,8 +11,6 @@ struct AddReminderView: View {
     @State private var notes = ""
     @State private var selectedCategory: Category?
     @State private var dueDate: Date?
-    @State private var hasDueDate = false
-    @State private var priority: ReminderPriority = .normal
     @State private var recurrence: RecurrenceType = .none
 
     @State private var isEnhancing = false
@@ -32,11 +30,9 @@ struct AddReminderView: View {
         return Calendar.current.isDateInTomorrow(dueDate)
     }
 
-    private var isDateNextWeek: Bool {
+    private var isDateWeekend: Bool {
         guard let dueDate = dueDate else { return false }
-        let calendar = Calendar.current
-        let nextWeek = calendar.date(byAdding: .day, value: 7, to: calendar.startOfDay(for: Date()))!
-        return calendar.isDate(dueDate, inSameDayAs: nextWeek)
+        return Calendar.current.isDate(dueDate, inSameDayAs: Date.nextWeekend)
     }
 
     var body: some View {
@@ -144,11 +140,18 @@ struct AddReminderView: View {
                         }
                     }
 
-                    // Category Selection
+                    // Category Selection (required)
                     VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                        Text("Category")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: Constants.Spacing.xs) {
+                            Text("Category")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            if selectedCategory == nil {
+                                Text("(required)")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
 
                         FlowLayout(spacing: Constants.Spacing.xs) {
                             ForEach(categories) { category in
@@ -158,11 +161,7 @@ struct AddReminderView: View {
                                 ) {
                                     HapticManager.selection()
                                     withAnimation(Constants.Animation.quick) {
-                                        if selectedCategory?.id == category.id {
-                                            selectedCategory = nil
-                                        } else {
-                                            selectedCategory = category
-                                        }
+                                        selectedCategory = category
                                     }
                                 }
                             }
@@ -176,56 +175,57 @@ struct AddReminderView: View {
                             .foregroundStyle(.secondary)
 
                         VStack(spacing: Constants.Spacing.sm) {
-                            Toggle("Set due date", isOn: $hasDueDate.animation())
-
-                            if hasDueDate {
-                                HStack(spacing: Constants.Spacing.xs) {
-                                    QuickDateButton(title: "Today", date: Date(), isSelected: isDateToday) {
-                                        dueDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date())
-                                    }
-                                    QuickDateButton(title: "Tomorrow", date: Date.tomorrow, isSelected: isDateTomorrow) {
-                                        dueDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date.tomorrow)
-                                    }
-                                    QuickDateButton(title: "Next Week", date: Date.nextWeek, isSelected: isDateNextWeek) {
-                                        dueDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date.nextWeek)
+                            HStack(spacing: Constants.Spacing.xs) {
+                                QuickDateButton(title: "Today", date: Date(), isSelected: isDateToday) {
+                                    dueDate = Calendar.current.startOfDay(for: Date())
+                                }
+                                QuickDateButton(title: "Tomorrow", date: Date.tomorrow, isSelected: isDateTomorrow) {
+                                    dueDate = Calendar.current.startOfDay(for: Date.tomorrow)
+                                }
+                                QuickDateButton(title: "Weekend", date: Date.nextWeekend, isSelected: isDateWeekend) {
+                                    dueDate = Date.nextWeekend
+                                }
+                                QuickDateButton(title: "Pick date", date: Date(), isSelected: showingDatePicker) {
+                                    withAnimation {
+                                        showingDatePicker = true
+                                        if dueDate == nil {
+                                            dueDate = Calendar.current.startOfDay(for: Date())
+                                        }
                                     }
                                 }
+                            }
 
-                                DatePicker(
-                                    "Due",
-                                    selection: Binding(
-                                        get: { dueDate ?? Date() },
-                                        set: { dueDate = $0 }
-                                    ),
-                                    displayedComponents: [.date, .hourAndMinute]
-                                )
-                                .datePickerStyle(.graphical)
+                            if dueDate != nil {
+                                if showingDatePicker {
+                                    DatePicker(
+                                        "Due",
+                                        selection: Binding(
+                                            get: { dueDate ?? Date() },
+                                            set: { dueDate = $0 }
+                                        ),
+                                        displayedComponents: [.date]
+                                    )
+                                    .datePickerStyle(.graphical)
+                                }
+
+                                // Recurrence
+                                RecurrencePicker(recurrence: $recurrence)
+
+                                Button {
+                                    dueDate = nil
+                                    showingDatePicker = false
+                                    recurrence = .none
+                                } label: {
+                                    Text("Clear date")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                         .padding()
                         .background(AppColors.secondaryBackground)
                         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
-                    }
-
-                    // Priority
-                    VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                        Text("Priority")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: Constants.Spacing.xs) {
-                            ForEach(ReminderPriority.allCases, id: \.self) { p in
-                                PriorityButton(priority: p, isSelected: priority == p) {
-                                    HapticManager.selection()
-                                    priority = p
-                                }
-                            }
-                        }
-                    }
-
-                    // Recurrence (only show if due date is set)
-                    if hasDueDate {
-                        RecurrencePicker(recurrence: $recurrence)
                     }
                 }
                 .padding()
@@ -247,7 +247,7 @@ struct AddReminderView: View {
                         addReminder()
                     }
                     .fontWeight(.semibold)
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || selectedCategory == nil)
                 }
             }
             .alert("Polish Failed", isPresented: $showingAIError) {
@@ -262,10 +262,9 @@ struct AddReminderView: View {
         let reminder = Reminder(
             title: title.trimmingCharacters(in: .whitespaces),
             notes: notes.trimmingCharacters(in: .whitespaces),
-            dueDate: hasDueDate ? dueDate : nil,
-            priority: priority,
+            dueDate: dueDate,
             category: selectedCategory,
-            recurrence: hasDueDate ? recurrence : .none
+            recurrence: dueDate != nil ? recurrence : .none
         )
 
         if !aiContext.isEmpty {
@@ -331,31 +330,6 @@ struct QuickDateButton: View {
                 .padding(.vertical, 8)
                 .background(isSelected ? Color.accentColor : AppColors.tertiaryBackground)
                 .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-struct PriorityButton: View {
-    let priority: ReminderPriority
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if let icon = priority.icon {
-                    Image(systemName: icon)
-                }
-                Text(priority.label)
-            }
-            .font(.subheadline)
-            .fontWeight(.medium)
-            .foregroundStyle(isSelected ? .white : priority == .normal ? .primary : priority.color)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(isSelected ? (priority == .normal ? Color.gray : priority.color) : AppColors.secondaryBackground)
-            .clipShape(Capsule())
         }
         .buttonStyle(.plain)
     }

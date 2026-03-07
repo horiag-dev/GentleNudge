@@ -11,9 +11,24 @@ struct ReminderDetailView: View {
 
     @State private var isEnhancing = false
     @State private var showDeleteConfirmation = false
-    @State private var hasDueDate: Bool = false
+    @State private var showingDatePicker: Bool = false
     @State private var showingAIError = false
     @State private var aiErrorMessage = ""
+
+    private var isDateToday: Bool {
+        guard let dueDate = reminder.dueDate else { return false }
+        return Calendar.current.isDateInToday(dueDate)
+    }
+
+    private var isDateTomorrow: Bool {
+        guard let dueDate = reminder.dueDate else { return false }
+        return Calendar.current.isDateInTomorrow(dueDate)
+    }
+
+    private var isDateWeekend: Bool {
+        guard let dueDate = reminder.dueDate else { return false }
+        return Calendar.current.isDate(dueDate, inSameDayAs: Date.nextWeekend)
+    }
 
     var body: some View {
         ScrollView {
@@ -144,11 +159,18 @@ struct ReminderDetailView: View {
                     }
                 }
 
-                // Category
+                // Category (required)
                 VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                    Text("Category")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: Constants.Spacing.xs) {
+                        Text("Category")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if reminder.category == nil {
+                            Text("(required)")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
 
                     FlowLayout(spacing: Constants.Spacing.xs) {
                         ForEach(categories) { category in
@@ -158,11 +180,7 @@ struct ReminderDetailView: View {
                             ) {
                                 HapticManager.selection()
                                 withAnimation(Constants.Animation.quick) {
-                                    if reminder.category?.id == category.id {
-                                        reminder.category = nil
-                                    } else {
-                                        reminder.category = category
-                                    }
+                                    reminder.category = category
                                 }
                             }
                         }
@@ -176,65 +194,69 @@ struct ReminderDetailView: View {
                         .foregroundStyle(.secondary)
 
                     VStack(spacing: Constants.Spacing.sm) {
-                        Toggle("Set due date", isOn: $hasDueDate.animation())
-                            .onChange(of: hasDueDate) { _, newValue in
-                                if !newValue {
-                                    reminder.dueDate = nil
-                                } else if reminder.dueDate == nil {
-                                    reminder.dueDate = Date()
+                        HStack(spacing: Constants.Spacing.xs) {
+                            QuickDateButton(title: "Today", date: Date(), isSelected: isDateToday) {
+                                reminder.dueDate = Calendar.current.startOfDay(for: Date())
+                            }
+                            QuickDateButton(title: "Tomorrow", date: Date.tomorrow, isSelected: isDateTomorrow) {
+                                reminder.dueDate = Calendar.current.startOfDay(for: Date.tomorrow)
+                            }
+                            QuickDateButton(title: "Weekend", date: Date.nextWeekend, isSelected: isDateWeekend) {
+                                reminder.dueDate = Date.nextWeekend
+                            }
+                            QuickDateButton(title: "Pick date", date: Date(), isSelected: showingDatePicker) {
+                                withAnimation {
+                                    showingDatePicker = true
+                                    if reminder.dueDate == nil {
+                                        reminder.dueDate = Calendar.current.startOfDay(for: Date())
+                                    }
                                 }
                             }
+                        }
 
-                        if hasDueDate {
-                            DatePicker(
-                                "Due",
-                                selection: Binding(
-                                    get: { reminder.dueDate ?? Date() },
-                                    set: { reminder.dueDate = $0 }
-                                ),
-                                displayedComponents: [.date, .hourAndMinute]
-                            )
-                            .datePickerStyle(.graphical)
+                        if reminder.dueDate != nil {
+                            if showingDatePicker {
+                                DatePicker(
+                                    "Due",
+                                    selection: Binding(
+                                        get: { reminder.dueDate ?? Date() },
+                                        set: { reminder.dueDate = $0 }
+                                    ),
+                                    displayedComponents: [.date]
+                                )
+                                .datePickerStyle(.graphical)
+                            }
+
+                            // Recurrence
+                            RecurrencePicker(recurrence: $reminder.recurrence)
+
+                            // Show detailed recurrence description
+                            if let detailed = reminder.detailedRecurrence {
+                                HStack(spacing: Constants.Spacing.xs) {
+                                    Image(systemName: "info.circle")
+                                        .foregroundStyle(.purple)
+                                    Text(detailed)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, Constants.Spacing.sm)
+                            }
+
+                            Button {
+                                reminder.dueDate = nil
+                                reminder.recurrence = .none
+                                showingDatePicker = false
+                            } label: {
+                                Text("Clear date")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding()
                     .background(AppColors.secondaryBackground)
                     .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
-                }
-
-                // Priority
-                VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                    Text("Priority")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: Constants.Spacing.xs) {
-                        ForEach(ReminderPriority.allCases, id: \.self) { p in
-                            PriorityButton(priority: p, isSelected: reminder.priority == p) {
-                                HapticManager.selection()
-                                reminder.priority = p
-                            }
-                        }
-                    }
-                }
-
-                // Recurrence (only show if due date is set)
-                if hasDueDate {
-                    VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                        RecurrencePicker(recurrence: $reminder.recurrence)
-
-                        // Show detailed recurrence description
-                        if let detailed = reminder.detailedRecurrence {
-                            HStack(spacing: Constants.Spacing.xs) {
-                                Image(systemName: "info.circle")
-                                    .foregroundStyle(.purple)
-                                Text(detailed)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, Constants.Spacing.sm)
-                        }
-                    }
                 }
 
                 // Metadata
@@ -282,7 +304,7 @@ struct ReminderDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .onAppear {
-            hasDueDate = reminder.dueDate != nil
+            showingDatePicker = reminder.dueDate != nil && !isDateToday && !isDateTomorrow && !isDateWeekend
         }
         .confirmationDialog("Delete Reminder", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {

@@ -75,6 +75,16 @@ extension Date {
     static var nextWeek: Date {
         Calendar.current.date(byAdding: .weekOfYear, value: 1, to: Date())!
     }
+
+    static var nextWeekend: Date {
+        let calendar = Calendar.current
+        var date = calendar.date(byAdding: .day, value: 1, to: Date())!
+        // Find next Saturday
+        while calendar.component(.weekday, from: date) != 7 {
+            date = calendar.date(byAdding: .day, value: 1, to: date)!
+        }
+        return calendar.startOfDay(for: date)
+    }
 }
 
 // MARK: - String Extensions

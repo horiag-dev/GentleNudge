@@ -508,13 +508,6 @@ struct UpcomingReminderRow: View {
             }
 
             Spacer()
-
-            // Priority indicator
-            if reminder.priority == .urgent {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
         }
         .padding(.vertical, Constants.Spacing.xs)
         .padding(.horizontal, Constants.Spacing.xs)
