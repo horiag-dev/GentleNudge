@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var showingOnboarding = false
 
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @State private var notificationUpdateTask: Task<Void, Never>?
 
     private var needsAttentionItems: [Reminder] {
         reminders.filter { reminder in
@@ -131,8 +132,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: reminders) { _, _ in
-            // Update badge and scheduled notification when reminders change
-            Task {
+            // Debounce notification updates — avoid redundant work on rapid changes
+            notificationUpdateTask?.cancel()
+            notificationUpdateTask = Task {
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s debounce
+                guard !Task.isCancelled else { return }
                 await NotificationService.shared.updateBadgeCount(needsAttentionCount)
                 NotificationService.shared.updateScheduledNotificationContent(
                     needsAttentionCount: needsAttentionCount,

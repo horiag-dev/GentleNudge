@@ -56,21 +56,10 @@ struct AllRemindersView: View {
         }
     }
 
-    // Completed reminders sorted by completion date for flat list display
-    private var completedRemindersByDate: [Reminder] {
-        filteredReminders
-    }
-
-    private func reminders(for category: Category?) -> [Reminder] {
-        if let category {
-            return filteredReminders.filter { $0.category?.id == category.id }
-        } else {
-            return filteredReminders.filter { $0.category == nil }
-        }
-    }
-
     var body: some View {
         NavigationStack {
+            let currentFiltered = filteredReminders
+
             ScrollView {
                 LazyVStack(spacing: Constants.Spacing.lg) {
                     // Filter Picker
@@ -93,14 +82,14 @@ struct AllRemindersView: View {
                                 Text("Recently Completed")
                                     .font(.headline)
                                 Spacer()
-                                Text("\(filteredReminders.count)")
+                                Text("\(currentFiltered.count)")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
                             .padding(.horizontal, Constants.Spacing.xs)
 
                             VStack(spacing: Constants.Spacing.xs) {
-                                ForEach(filteredReminders) { reminder in
+                                ForEach(currentFiltered) { reminder in
                                     CompletedReminderRow(reminder: reminder)
                                 }
                             }
@@ -109,20 +98,20 @@ struct AllRemindersView: View {
 
                     case .recurring:
                         // Simple list of recurring items grouped by frequency
-                        RecurringRemindersSection(reminders: filteredReminders)
+                        RecurringRemindersSection(reminders: currentFiltered)
                             .padding(.horizontal)
 
                     default:
                         // Reminders by Category
                         ForEach(categories) { category in
-                            let categoryReminders = reminders(for: category)
+                            let categoryReminders = currentFiltered.filter { $0.category?.id == category.id }
                             if !categoryReminders.isEmpty {
                                 CategorySection(category: category, reminders: categoryReminders)
                             }
                         }
 
                         // Uncategorized
-                        let uncategorized = reminders(for: nil)
+                        let uncategorized = currentFiltered.filter { $0.category == nil }
                         if !uncategorized.isEmpty {
                             VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
                                 HStack(spacing: Constants.Spacing.xs) {
@@ -147,7 +136,7 @@ struct AllRemindersView: View {
                         }
                     }
 
-                    if filteredReminders.isEmpty {
+                    if currentFiltered.isEmpty {
                         ContentUnavailableView(
                             searchText.isEmpty ? "No Reminders" : "No Results",
                             systemImage: searchText.isEmpty ? "tray" : "magnifyingglass",
@@ -276,20 +265,32 @@ struct CompletedReminderRow: View {
 struct RecurringRemindersSection: View {
     let reminders: [Reminder]
 
-    private var dailyReminders: [Reminder] {
-        reminders.filter { $0.recurrence == .daily }
+    private struct RecurrenceGroupData: Identifiable {
+        let id: String
+        let title: String
+        let icon: String
+        let color: Color
+        let reminders: [Reminder]
     }
 
-    private var weeklyReminders: [Reminder] {
-        reminders.filter { $0.recurrence == .weekly }
-    }
+    private var groupedByRecurrence: [RecurrenceGroupData] {
+        // Single pass to group by recurrence type
+        var grouped: [RecurrenceType: [Reminder]] = [:]
+        for reminder in reminders {
+            grouped[reminder.recurrence, default: []].append(reminder)
+        }
 
-    private var biweeklyReminders: [Reminder] {
-        reminders.filter { $0.recurrence == .biweekly }
-    }
+        let groupDefs: [(type: RecurrenceType, title: String, icon: String, color: Color)] = [
+            (.daily, "Daily", "sun.max.fill", .yellow),
+            (.weekly, "Weekly", "calendar.circle", .blue),
+            (.biweekly, "Every 2 Weeks", "calendar.badge.clock", .purple),
+            (.monthly, "Monthly", "calendar", .green),
+        ]
 
-    private var monthlyReminders: [Reminder] {
-        reminders.filter { $0.recurrence == .monthly }
+        return groupDefs.compactMap { def in
+            guard let items = grouped[def.type], !items.isEmpty else { return nil }
+            return RecurrenceGroupData(id: def.title, title: def.title, icon: def.icon, color: def.color, reminders: items)
+        }
     }
 
     var body: some View {
@@ -306,43 +307,12 @@ struct RecurringRemindersSection: View {
                     .foregroundStyle(.secondary)
             }
 
-            // Daily
-            if !dailyReminders.isEmpty {
+            ForEach(groupedByRecurrence) { group in
                 RecurrenceGroup(
-                    title: "Daily",
-                    icon: "sun.max.fill",
-                    color: .yellow,
-                    reminders: dailyReminders
-                )
-            }
-
-            // Weekly
-            if !weeklyReminders.isEmpty {
-                RecurrenceGroup(
-                    title: "Weekly",
-                    icon: "calendar.circle",
-                    color: .blue,
-                    reminders: weeklyReminders
-                )
-            }
-
-            // Biweekly
-            if !biweeklyReminders.isEmpty {
-                RecurrenceGroup(
-                    title: "Every 2 Weeks",
-                    icon: "calendar.badge.clock",
-                    color: .purple,
-                    reminders: biweeklyReminders
-                )
-            }
-
-            // Monthly
-            if !monthlyReminders.isEmpty {
-                RecurrenceGroup(
-                    title: "Monthly",
-                    icon: "calendar",
-                    color: .green,
-                    reminders: monthlyReminders
+                    title: group.title,
+                    icon: group.icon,
+                    color: group.color,
+                    reminders: group.reminders
                 )
             }
         }

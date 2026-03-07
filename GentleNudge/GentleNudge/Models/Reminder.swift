@@ -265,6 +265,36 @@ final class Reminder {
         markCompleted()
     }
 
+    // Cached set of completion day strings for O(1) lookups
+    // Rebuilt lazily when habitCompletionDates changes
+    @Transient private var _completionDayKeys: Set<String>?
+    @Transient private var _completionDatesCount: Int = -1
+
+    private var completionDayKeys: Set<String> {
+        // Rebuild cache if array count changed (simple invalidation)
+        if _completionDayKeys == nil || _completionDatesCount != habitCompletionDates.count {
+            _completionDayKeys = Set(habitCompletionDates.map { Self.dayKey(for: $0) })
+            _completionDatesCount = habitCompletionDates.count
+        }
+        return _completionDayKeys!
+    }
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = Calendar.current.timeZone
+        return f
+    }()
+
+    private static func dayKey(for date: Date) -> String {
+        dayKeyFormatter.string(from: date)
+    }
+
+    private func invalidateCompletionCache() {
+        _completionDayKeys = nil
+        _completionDatesCount = -1
+    }
+
     /// For habits: just set completedAt without marking permanently complete
     /// The habit resets at midnight since isCompletedToday checks the date
     func markHabitDoneToday() {
@@ -272,8 +302,10 @@ final class Reminder {
         completedAt = Date()
 
         // Add to history if not already completed today
-        if !habitCompletionDates.contains(where: { Calendar.current.isDate($0, inSameDayAs: today) }) {
+        let key = Self.dayKey(for: today)
+        if !completionDayKeys.contains(key) {
             habitCompletionDates.append(today)
+            invalidateCompletionCache()
         }
     }
 
@@ -284,21 +316,33 @@ final class Reminder {
         // Remove today from history
         let today = Calendar.current.startOfDay(for: Date())
         habitCompletionDates.removeAll { Calendar.current.isDate($0, inSameDayAs: today) }
+        invalidateCompletionCache()
     }
 
-    /// Check if habit was completed on a specific date
+    /// Check if habit was completed on a specific date — O(1) via cached Set
     func wasCompletedOn(date: Date) -> Bool {
-        habitCompletionDates.contains { Calendar.current.isDate($0, inSameDayAs: date) }
+        completionDayKeys.contains(Self.dayKey(for: date))
     }
 
     /// Get completion count for the last N days
     func completionCount(days: Int) -> Int {
         guard days > 0 else { return 0 }
         let calendar = Calendar.current
-        guard let startDate = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date())) else {
+        let today = calendar.startOfDay(for: Date())
+        guard let startDate = calendar.date(byAdding: .day, value: -(days - 1), to: today) else {
             return 0
         }
-        return habitCompletionDates.filter { $0 >= startDate }.count
+        // Use cached set for fast counting
+        var count = 0
+        var date = startDate
+        while date <= today {
+            if completionDayKeys.contains(Self.dayKey(for: date)) {
+                count += 1
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: date) else { break }
+            date = next
+        }
+        return count
     }
 
     /// For recurring reminders, creates the next occurrence and resets this one

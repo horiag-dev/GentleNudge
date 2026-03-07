@@ -6,12 +6,26 @@ struct TodayView: View {
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
-    // MARK: - Categorized Reminders (single-pass optimization)
+    @State private var searchText = ""
 
-    /// Categorizes all reminders in a single pass for better performance
-    private var categorizedReminders: (habits: [Reminder], needsAttention: [Reminder], upcoming: [Reminder], byCategory: [UUID: [Reminder]]) {
+    // MARK: - Categorized Reminders (computed from @Query for full reactivity)
+
+    private struct CategorizedReminders {
+        let habits: [Reminder]
+        let needsAttention: [Reminder]
+        let upcoming: [Reminder]
+        let needsAttentionByCategory: [(category: Category?, reminders: [Reminder])]
+        let byCategory: [UUID: [Reminder]]
+    }
+
+    private var categorizedReminders: CategorizedReminders {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
+
+        let filterBlock: (Reminder) -> Bool = searchText.isEmpty ? { _ in true } : { reminder in
+            reminder.title.localizedCaseInsensitiveContains(searchText) ||
+            reminder.notes.localizedCaseInsensitiveContains(searchText)
+        }
 
         var habits: [Reminder] = []
         var needsAttention: [Reminder] = []
@@ -19,16 +33,14 @@ struct TodayView: View {
         var byCategory: [UUID: [Reminder]] = [:]
 
         for reminder in reminders {
-            // Skip completed
             guard !reminder.isCompleted else { continue }
+            guard filterBlock(reminder) else { continue }
 
-            // Habits go to their own list
             if reminder.isHabit {
                 habits.append(reminder)
                 continue
             }
 
-            // Calculate days until due once
             let daysUntil: Int?
             if let dueDate = reminder.dueDate {
                 let due = calendar.startOfDay(for: dueDate)
@@ -39,18 +51,17 @@ struct TodayView: View {
 
             let isOverdue = daysUntil.map { $0 < 0 } ?? false
             let isDueToday = daysUntil == 0
-            let isUpcoming = daysUntil.map { $0 >= 1 && $0 <= 2 } ?? false
+            let isUpcomingSoon = daysUntil.map { $0 >= 1 && $0 <= 2 } ?? false
 
             if isOverdue || isDueToday {
                 needsAttention.append(reminder)
-            } else if isUpcoming {
+            } else if isUpcomingSoon {
                 upcoming.append(reminder)
             } else if let categoryId = reminder.category?.id {
                 byCategory[categoryId, default: []].append(reminder)
             }
         }
 
-        // Sort each list
         habits.sort { $0.title < $1.title }
         needsAttention.sort { r1, r2 in
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
@@ -58,30 +69,6 @@ struct TodayView: View {
             return r1.priority.rawValue > r2.priority.rawValue
         }
         upcoming.sort { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
-        for key in byCategory.keys {
-            byCategory[key]?.sort { $0.priority.rawValue > $1.priority.rawValue }
-        }
-
-        return (habits, needsAttention, upcoming, byCategory)
-    }
-
-    @State private var searchText = ""
-
-    // MARK: - Search Filtered Results (uses cached categorization)
-
-    /// All filtered data computed once, accessed via single property
-    private var filteredData: FilteredReminderData {
-        let cached = categorizedReminders
-
-        // Apply search filter
-        let filterBlock: (Reminder) -> Bool = searchText.isEmpty ? { _ in true } : { reminder in
-            reminder.title.localizedCaseInsensitiveContains(searchText) ||
-            reminder.notes.localizedCaseInsensitiveContains(searchText)
-        }
-
-        let habits = cached.habits.filter(filterBlock)
-        let needsAttention = cached.needsAttention.filter(filterBlock)
-        let upcoming = cached.upcoming.filter(filterBlock)
 
         // Group needs attention by category
         var grouped: [UUID?: [Reminder]] = [:]
@@ -91,24 +78,15 @@ struct TodayView: View {
 
         var needsAttentionByCategory: [(category: Category?, reminders: [Reminder])] = []
         for category in categories {
-            if let reminders = grouped[category.id], !reminders.isEmpty {
-                needsAttentionByCategory.append((category: category, reminders: reminders))
+            if let catReminders = grouped[category.id], !catReminders.isEmpty {
+                needsAttentionByCategory.append((category: category, reminders: catReminders))
             }
         }
         if let uncategorized = grouped[nil], !uncategorized.isEmpty {
             needsAttentionByCategory.append((category: nil, reminders: uncategorized))
         }
 
-        // Filter category reminders
-        var byCategory: [UUID: [Reminder]] = [:]
-        for (key, value) in cached.byCategory {
-            let filtered = value.filter(filterBlock)
-            if !filtered.isEmpty {
-                byCategory[key] = filtered
-            }
-        }
-
-        return FilteredReminderData(
+        return CategorizedReminders(
             habits: habits,
             needsAttention: needsAttention,
             upcoming: upcoming,
@@ -117,35 +95,19 @@ struct TodayView: View {
         )
     }
 
-    private struct FilteredReminderData {
-        let habits: [Reminder]
-        let needsAttention: [Reminder]
-        let upcoming: [Reminder]
-        let needsAttentionByCategory: [(category: Category?, reminders: [Reminder])]
-        let byCategory: [UUID: [Reminder]]
-    }
-
-    // Convenience accessors that use the cached filteredData
-    private var searchFilteredHabits: [Reminder] { filteredData.habits }
-    private var searchFilteredNeedsAttention: [Reminder] { filteredData.needsAttention }
-    private var searchFilteredUpcoming: [Reminder] { filteredData.upcoming }
-    private var searchFilteredNeedsAttentionByCategory: [(category: Category?, reminders: [Reminder])] { filteredData.needsAttentionByCategory }
-
-    private func searchFilteredRemindersForCategory(_ category: Category) -> [Reminder] {
-        filteredData.byCategory[category.id] ?? []
-    }
-
     var body: some View {
         NavigationStack {
+            let data = categorizedReminders
+
             ScrollView {
                 LazyVStack(spacing: Constants.Spacing.sm) {
                     // Habits Section - Daily Checklist
-                    if !searchFilteredHabits.isEmpty {
-                        HabitsSection(habits: searchFilteredHabits)
+                    if !data.habits.isEmpty {
+                        HabitsSection(habits: data.habits)
                     }
 
                     // Urgent / Time-sensitive / High Priority - grouped by category
-                    if !searchFilteredNeedsAttention.isEmpty {
+                    if !data.needsAttention.isEmpty {
                         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
                             HStack(spacing: Constants.Spacing.xs) {
                                 Image(systemName: "exclamationmark.circle.fill")
@@ -155,7 +117,7 @@ struct TodayView: View {
                             }
 
                             VStack(spacing: Constants.Spacing.md) {
-                                ForEach(Array(searchFilteredNeedsAttentionByCategory.enumerated()), id: \.offset) { _, group in
+                                ForEach(Array(data.needsAttentionByCategory.enumerated()), id: \.offset) { _, group in
                                         VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
                                             // Category header
                                             if let category = group.category {
@@ -190,7 +152,7 @@ struct TodayView: View {
                         }
 
                     // Upcoming - due in the next 2 days
-                    if !searchFilteredUpcoming.isEmpty {
+                    if !data.upcoming.isEmpty {
                         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
                             HStack(spacing: Constants.Spacing.xs) {
                                 Image(systemName: "calendar.badge.clock")
@@ -198,12 +160,12 @@ struct TodayView: View {
                                 Text("Upcoming")
                                     .font(.headline)
                                 Spacer()
-                                Text("\(searchFilteredUpcoming.count)")
+                                Text("\(data.upcoming.count)")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
 
-                            ForEach(searchFilteredUpcoming) { reminder in
+                            ForEach(data.upcoming) { reminder in
                                     UpcomingReminderRow(reminder: reminder)
                                 }
                             }
@@ -216,7 +178,7 @@ struct TodayView: View {
 
                     // Categories with reminders
                     ForEach(categories.filter { $0.name != "Habits" }) { category in
-                        let categoryReminders = searchFilteredRemindersForCategory(category)
+                        let categoryReminders = data.byCategory[category.id] ?? []
                         if !categoryReminders.isEmpty {
                             HomeCategorySection(
                                 category: category,
@@ -227,10 +189,10 @@ struct TodayView: View {
 
                     // Empty state when searching
                     if !searchText.isEmpty &&
-                       searchFilteredHabits.isEmpty &&
-                       searchFilteredNeedsAttention.isEmpty &&
-                       searchFilteredUpcoming.isEmpty &&
-                       categories.allSatisfy({ searchFilteredRemindersForCategory($0).isEmpty }) {
+                       data.habits.isEmpty &&
+                       data.needsAttention.isEmpty &&
+                       data.upcoming.isEmpty &&
+                       data.byCategory.isEmpty {
                         ContentUnavailableView(
                             "No Results",
                             systemImage: "magnifyingglass",
