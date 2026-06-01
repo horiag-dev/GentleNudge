@@ -55,8 +55,11 @@ class NotificationService {
 
     var notificationHour: Int {
         get {
-            let hour = UserDefaults.standard.integer(forKey: hourKey)
-            return hour == 0 ? 8 : hour // Default to 8 AM
+            // Distinguish "never set" from a deliberately chosen midnight (hour 0).
+            guard UserDefaults.standard.object(forKey: hourKey) != nil else {
+                return 8 // Default to 8 AM
+            }
+            return UserDefaults.standard.integer(forKey: hourKey)
         }
         set {
             UserDefaults.standard.set(newValue, forKey: hourKey)

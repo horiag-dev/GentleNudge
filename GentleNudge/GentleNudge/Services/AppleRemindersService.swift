@@ -135,6 +135,10 @@ actor AppleRemindersService {
         }
     }
 
+    /// Syncs all reminders to the Apple Reminders backup list.
+    /// Returns a mapping of reminder.id.uuidString -> Apple sync identifier for every
+    /// reminder, so the caller can persist the IDs. Reminders that were previously
+    /// synced (have a valid `appleSyncID`) are updated in place rather than duplicated.
     func syncAllReminders(_ reminders: [Reminder]) async throws -> [String: String] {
         let status = checkAuthorizationStatus()
         guard status == .authorized else {
@@ -145,18 +149,29 @@ actor AppleRemindersService {
         var syncMapping: [String: String] = [:]
 
         for reminder in reminders {
-            let ekReminder = EKReminder(eventStore: eventStore)
+            // Reuse the existing Apple reminder if we've synced this one before,
+            // otherwise create a new one. This prevents duplicates on re-sync.
+            let ekReminder: EKReminder
+            if let syncID = reminder.appleSyncID,
+               let existing = eventStore.calendarItem(withIdentifier: syncID) as? EKReminder {
+                ekReminder = existing
+            } else {
+                ekReminder = EKReminder(eventStore: eventStore)
+                ekReminder.calendar = list
+            }
+
             ekReminder.title = reminder.title
             ekReminder.notes = buildNotes(for: reminder)
             ekReminder.isCompleted = reminder.isCompleted
             ekReminder.priority = mapPriority(reminder.priority)
-            ekReminder.calendar = list
 
             if let dueDate = reminder.dueDate {
                 ekReminder.dueDateComponents = Calendar.current.dateComponents(
                     [.year, .month, .day, .hour, .minute],
                     from: dueDate
                 )
+            } else {
+                ekReminder.dueDateComponents = nil
             }
 
             try eventStore.save(ekReminder, commit: false)

@@ -6,6 +6,7 @@ struct ImportRemindersView: View {
     @Environment(\.modelContext) private var modelContext
 
     @Query(sort: \Category.sortOrder) private var categories: [Category]
+    @Query private var existingReminders: [Reminder]
 
     @State private var importState: ImportState = .idle
     @State private var importedReminders: [AppleRemindersService.ImportedReminder] = []
@@ -273,8 +274,22 @@ struct ImportRemindersView: View {
             }
 
             await MainActor.run {
+                // Build a set of keys for reminders we already have, so re-importing
+                // doesn't create duplicates.
+                func dedupKey(title: String, dueDate: Date?) -> String {
+                    let day = dueDate.map { Calendar.current.startOfDay(for: $0).timeIntervalSince1970 } ?? -1
+                    return "\(title.lowercased())|\(day)"
+                }
+                var existingKeys = Set(existingReminders.map { dedupKey(title: $0.title, dueDate: $0.dueDate) })
+
+                var importedNew = 0
                 for imported in fetched {
                     let finalDueDate = shouldRemoveDates ? nil : imported.dueDate
+
+                    // Skip if an equivalent reminder already exists (or was just imported).
+                    let key = dedupKey(title: imported.title, dueDate: finalDueDate)
+                    guard !existingKeys.contains(key) else { continue }
+                    existingKeys.insert(key)
 
                     // Try to match category by list name
                     let category = categories.first { cat in
@@ -292,12 +307,17 @@ struct ImportRemindersView: View {
                     )
 
                     modelContext.insert(reminder)
+                    importedNew += 1
                 }
 
                 try? modelContext.save()
 
+                importedCount = importedNew
                 importState = .completed
-                statusMessage = "Successfully imported \(fetched.count) reminders"
+                let skipped = fetched.count - importedNew
+                statusMessage = skipped > 0
+                    ? "Imported \(importedNew) reminders (\(skipped) already existed)"
+                    : "Successfully imported \(importedNew) reminders"
                 progress = 1.0
                 HapticManager.notification(.success)
             }

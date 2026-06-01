@@ -39,7 +39,7 @@ struct ReminderDetailView: View {
                         withAnimation(Constants.Animation.spring) {
                             HapticManager.notification(reminder.isCompleted ? .warning : .success)
                             if reminder.isCompleted {
-                                reminder.markIncomplete()
+                                reminder.uncomplete(in: modelContext)
                             } else {
                                 completeReminder()
                             }

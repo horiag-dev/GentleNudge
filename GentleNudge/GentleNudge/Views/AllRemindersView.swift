@@ -195,7 +195,7 @@ struct CompletedReminderRow: View {
                 // Undo button
                 Button {
                     withAnimation {
-                        reminder.markIncomplete()
+                        reminder.uncomplete(in: modelContext)
                     }
                     HapticManager.impact(.light)
                 } label: {

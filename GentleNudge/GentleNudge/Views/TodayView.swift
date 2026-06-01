@@ -427,7 +427,7 @@ struct UpcomingReminderRow: View {
                 withAnimation(Constants.Animation.spring) {
                     HapticManager.impact(.medium)
                     if reminder.isCompleted {
-                        reminder.markIncomplete()
+                        reminder.uncomplete(in: modelContext)
                     } else {
                         completeReminder()
                     }
@@ -506,7 +506,7 @@ struct NeedsAttentionRow: View {
                 withAnimation(Constants.Animation.spring) {
                     HapticManager.impact(.medium)
                     if reminder.isCompleted {
-                        reminder.markIncomplete()
+                        reminder.uncomplete(in: modelContext)
                     } else {
                         completeReminder()
                     }
