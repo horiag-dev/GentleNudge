@@ -136,6 +136,10 @@ final class Reminder {
     var hasBeenSynced: Bool = false
     var recurrenceRaw: Int = 0
 
+    /// For recurring reminders: the id of the next occurrence spawned when this one
+    /// was completed. Used to remove the orphan if the completion is later undone.
+    var nextOccurrenceID: UUID?
+
     var category: Category?
 
     // Habit completion history - stores dates when habit was completed
@@ -259,10 +263,34 @@ final class Reminder {
     /// Complete a reminder, handling recurring logic automatically.
     /// For recurring reminders, creates the next occurrence before marking complete.
     func complete(in modelContext: ModelContext) {
+        // Guard against re-completing an already-completed reminder, which would
+        // spawn a second next occurrence (data duplication).
+        guard !isCompleted else { return }
+
         if isRecurring, let nextReminder = createNextOccurrence() {
             modelContext.insert(nextReminder)
+            nextOccurrenceID = nextReminder.id
         }
         markCompleted()
+    }
+
+    /// Undo a completion. For recurring reminders, removes the next occurrence that
+    /// was spawned by `complete(in:)` so toggling complete on/off doesn't accumulate
+    /// duplicate future occurrences.
+    func uncomplete(in modelContext: ModelContext) {
+        if let spawnedID = nextOccurrenceID {
+            let id = spawnedID
+            var descriptor = FetchDescriptor<Reminder>(predicate: #Predicate { $0.id == id })
+            descriptor.fetchLimit = 1
+            // Only remove the spawned occurrence if it's still pristine (untouched
+            // and not itself completed), so we never delete data the user has acted on.
+            if let spawned = try? modelContext.fetch(descriptor).first,
+               !spawned.isCompleted {
+                modelContext.delete(spawned)
+            }
+            nextOccurrenceID = nil
+        }
+        markIncomplete()
     }
 
     // Cached set of completion day strings for O(1) lookups

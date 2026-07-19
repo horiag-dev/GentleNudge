@@ -607,7 +607,7 @@ struct MacReminderRow: View {
                     if isHabit {
                         reminder.isCompletedToday ? reminder.clearHabitCompletion() : reminder.markHabitDoneToday()
                     } else {
-                        reminder.isCompleted ? reminder.markIncomplete() : completeReminder()
+                        reminder.isCompleted ? reminder.uncomplete(in: modelContext) : completeReminder()
                     }
                 }
             } label: {
@@ -764,7 +764,7 @@ struct MacReminderDetailPanel: View {
                     Button {
                         withAnimation {
                             if reminder.isCompleted {
-                                reminder.markIncomplete()
+                                reminder.uncomplete(in: modelContext)
                             } else {
                                 reminder.complete(in: modelContext)
                             }

@@ -3,18 +3,27 @@ import SwiftUI
 enum Constants {
     // MARK: - Claude API
     private static let apiKeyUserDefaultsKey = "claudeAPIKey"
+    private static let apiKeyKeychainAccount = "com.horiag.GentleNudge.claudeAPIKey"
+    private static let apiKeyPlaceholder = "YOUR_CLAUDE_API_KEY_HERE"
 
     static var claudeAPIKey: String {
         get {
-            // Check UserDefaults first, then fall back to hardcoded value
-            if let storedKey = UserDefaults.standard.string(forKey: apiKeyUserDefaultsKey),
-               !storedKey.isEmpty {
-                return storedKey
+            // Read from the Keychain (secure storage).
+            if let key = KeychainHelper.get(apiKeyKeychainAccount), !key.isEmpty {
+                return key
             }
-            return "YOUR_CLAUDE_API_KEY_HERE"
+            // One-time migration: an earlier build stored the key in UserDefaults.
+            // Move it into the Keychain and scrub the plaintext copy.
+            if let legacyKey = UserDefaults.standard.string(forKey: apiKeyUserDefaultsKey),
+               !legacyKey.isEmpty {
+                KeychainHelper.set(legacyKey, for: apiKeyKeychainAccount)
+                UserDefaults.standard.removeObject(forKey: apiKeyUserDefaultsKey)
+                return legacyKey
+            }
+            return apiKeyPlaceholder
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: apiKeyUserDefaultsKey)
+            KeychainHelper.set(newValue, for: apiKeyKeychainAccount)
         }
     }
 

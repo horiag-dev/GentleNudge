@@ -21,7 +21,7 @@ struct ReminderRow: View {
                     withAnimation(Constants.Animation.spring) {
                         HapticManager.notification(reminder.isCompleted ? .warning : .success)
                         if reminder.isCompleted {
-                            reminder.markIncomplete()
+                            reminder.uncomplete(in: modelContext)
                         } else {
                             completeReminder()
                         }
@@ -85,7 +85,7 @@ struct ReminderRow: View {
             Button {
                 withAnimation {
                     if reminder.isCompleted {
-                        reminder.markIncomplete()
+                        reminder.uncomplete(in: modelContext)
                     } else {
                         completeReminder()
                     }
@@ -121,7 +121,7 @@ struct ReminderRow: View {
                 withAnimation {
                     HapticManager.notification(.success)
                     if reminder.isCompleted {
-                        reminder.markIncomplete()
+                        reminder.uncomplete(in: modelContext)
                     } else {
                         completeReminder()
                     }

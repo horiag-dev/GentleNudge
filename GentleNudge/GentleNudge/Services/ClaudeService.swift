@@ -167,7 +167,9 @@ actor ClaudeService {
         let lines = response.components(separatedBy: "\n")
 
         var polishedTitle = title
-        var polishedNotes = notes
+        // Notes are intentionally never modified — we keep the original to preserve
+        // any URLs exactly as the user entered them.
+        let polishedNotes = notes
         var linkInfo: String?
 
         for line in lines {
@@ -176,12 +178,6 @@ actor ClaudeService {
                 let newTitle = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
                 if !newTitle.isEmpty && newTitle.lowercased() != "(none)" {
                     polishedTitle = newTitle
-                }
-            } else if trimmed.uppercased().hasPrefix("NOTES:") {
-                let newNotes = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
-                if newNotes.lowercased() != "(none)" && newNotes.lowercased() != "(unchanged)" {
-                    // Keep original notes to preserve URLs exactly
-                    polishedNotes = notes
                 }
             } else if trimmed.uppercased().hasPrefix("LINK_INFO:") {
                 let info = trimmed.dropFirst(10).trimmingCharacters(in: .whitespaces)

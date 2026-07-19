@@ -59,6 +59,7 @@
 				Services/URLMetadataService.swift,
 				Utilities/Constants.swift,
 				Utilities/Extensions.swift,
+				Utilities/KeychainHelper.swift,
 				Views/AddReminderView.swift,
 				Views/AllRemindersView.swift,
 				Views/CategoriesView.swift,
