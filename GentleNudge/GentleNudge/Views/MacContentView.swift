@@ -282,6 +282,21 @@ struct MacContentView: View {
     private var todayListView: some View {
         ScrollView {
             LazyVStack(spacing: 16) {
+                // All-clear state
+                if (!showHabits || habitReminders.isEmpty)
+                    && needsAttentionReminders.isEmpty
+                    && categoriesWithReminders.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.tertiary)
+                        Text("All caught up!")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 80)
+                }
+
                 // Habits Section
                 if showHabits && !habitReminders.isEmpty {
                     MacSectionCard(title: "Habits", icon: "leaf.circle.fill", color: .teal) {
@@ -708,11 +723,21 @@ struct MacReminderRow: View {
     }
 
     private func formatDate(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
             return "Today"
         }
-        if Calendar.current.isDateInTomorrow(date) {
+        if calendar.isDateInTomorrow(date) {
             return "Tomorrow"
+        }
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+        // Overdue: relative wording is clearer than a bare past date
+        let today = calendar.startOfDay(for: Date())
+        let day = calendar.startOfDay(for: date)
+        if day < today, let days = calendar.dateComponents([.day], from: day, to: today).day {
+            return "\(days) days ago"
         }
         return date.formatted(date: .abbreviated, time: .omitted)
     }
