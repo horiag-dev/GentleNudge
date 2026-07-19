@@ -14,7 +14,22 @@ class AppState: ObservableObject {
 
 @main
 struct GentleNudgeApp: App {
-    var sharedModelContainer: ModelContainer = {
+    /// The single shared container, created once at launch.
+    let sharedModelContainer: ModelContainer
+
+    /// One `ChatCoordinator` owned **above** navigation (§3.1) so it survives the
+    /// macOS detail-column swap and iOS tab changes; injected into `ChatView` via
+    /// the environment. It writes through its own `ReminderRepository` over the
+    /// shared container.
+    @State private var chatCoordinator: ChatCoordinator
+
+    init() {
+        let container = Self.makeSharedModelContainer()
+        self.sharedModelContainer = container
+        _chatCoordinator = State(initialValue: ChatCoordinator(modelContainer: container))
+    }
+
+    private static func makeSharedModelContainer() -> ModelContainer {
         let schema = Schema([
             Reminder.self,
             Category.self,
@@ -170,16 +185,19 @@ struct GentleNudgeApp: App {
                 }
             }
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {
-            #if os(macOS)
-            MacContentView()
-                .frame(minWidth: 800, minHeight: 500)
-            #else
-            ContentView()
-            #endif
+            Group {
+                #if os(macOS)
+                MacContentView()
+                    .frame(minWidth: 800, minHeight: 500)
+                #else
+                ContentView()
+                #endif
+            }
+            .environment(chatCoordinator)
         }
         .modelContainer(sharedModelContainer)
         #if os(macOS)

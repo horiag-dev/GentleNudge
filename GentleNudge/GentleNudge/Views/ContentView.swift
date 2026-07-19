@@ -5,6 +5,9 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query private var reminders: [Reminder]
     @State private var selectedTab = 0
+    /// The last non-pseudo tab, so tapping "New" returns here instead of a
+    /// hard-coded 0 (Today=0, Assistant=1, Settings=3 are real; New=2 is a sheet).
+    @State private var lastRealTab = 0
     @State private var showingAddReminder = false
     @State private var showingOnboarding = false
 
@@ -54,30 +57,39 @@ struct ContentView: View {
         TabView(selection: $selectedTab) {
             TodayView()
                 .tabItem {
-                    Label("Today", systemImage: "sparkles")
+                    Label("Today", systemImage: "checklist")
                 }
                 .tag(0)
+
+            ChatView(onOpenSettings: { selectedTab = 3 })
+                .tabItem {
+                    Label("Assistant", systemImage: "sparkles")
+                }
+                .tag(1)
 
             // Empty view for "New" tab - triggers sheet via onChange
             Color.clear
                 .tabItem {
                     Label("New", systemImage: "plus.app.fill")
                 }
-                .tag(1)
+                .tag(2)
 
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
-                .tag(2)
+                .tag(3)
         }
         .onChange(of: selectedTab) { _, newTab in
-            if newTab == 1 {
-                // "New" tab selected - show add sheet and return to previous tab
+            if newTab == 2 {
+                // "New" is a pseudo-tab: show the add sheet and bounce back to the
+                // last real tab (not a hard-coded 0).
                 HapticManager.impact(.light)
                 showingAddReminder = true
-                // Return to Today tab
-                selectedTab = 0
+                selectedTab = lastRealTab
+            } else {
+                // Remember the most recent real tab (0 / 1 / 3).
+                lastRealTab = newTab
             }
         }
         .sheet(isPresented: $showingAddReminder) {

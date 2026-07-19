@@ -17,6 +17,7 @@ struct MacContentView: View {
     @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
 
     enum SidebarItem: Hashable {
+        case chat
         case today
         case scheduled
         case all
@@ -117,6 +118,43 @@ struct MacContentView: View {
                 .padding(8)
                 .background(AppColors.secondaryBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+
+                // Assistant — flagship top-level destination (⌘⇧A)
+                Button {
+                    selectedSidebarItem = .chat
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkles")
+                            .font(.title3)
+                            .foregroundStyle(Color.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Assistant")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("Add reminders by chatting")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(selectedSidebarItem == .chat
+                                ? Color.accentColor.opacity(0.18)
+                                : Color.accentColor.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(selectedSidebarItem == .chat ? Color.accentColor : .clear, lineWidth: 2)
+                    )
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("a", modifiers: [.command, .shift])
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
 
@@ -224,6 +262,9 @@ struct MacContentView: View {
             }
         } detail: {
             // MARK: Main Content
+            if selectedSidebarItem == .chat {
+                ChatView(onOpenSettings: { showingSettings = true })
+            } else {
             HSplitView {
                 // Reminder List
                 VStack(spacing: 0) {
@@ -261,6 +302,7 @@ struct MacContentView: View {
                         .frame(minWidth: 320, idealWidth: 380, maxWidth: 420)
                         .transition(.move(edge: .trailing))
                 }
+            }
             }
         }
         .sheet(isPresented: $showingAddReminder) {
@@ -441,6 +483,8 @@ struct MacContentView: View {
 
     private var displayedReminders: [Reminder] {
         switch selectedSidebarItem {
+        case .chat:
+            return []
         case .today:
             return needsAttentionReminders
         case .scheduled:
@@ -462,6 +506,7 @@ struct MacContentView: View {
 
     private var sidebarTitle: String {
         switch selectedSidebarItem {
+        case .chat: return "Assistant"
         case .today: return "Today"
         case .scheduled: return "Scheduled"
         case .all: return "All"
@@ -475,6 +520,7 @@ struct MacContentView: View {
 
     private var sidebarColor: Color {
         switch selectedSidebarItem {
+        case .chat: return .accentColor
         case .today: return .blue
         case .scheduled: return .red
         case .all: return .gray
@@ -502,6 +548,7 @@ struct MacContentView: View {
 
     private var emptyMessage: String {
         switch selectedSidebarItem {
+        case .chat: return "Assistant"
         case .today: return "All caught up!"
         case .scheduled: return "No scheduled reminders"
         case .all: return "No reminders"

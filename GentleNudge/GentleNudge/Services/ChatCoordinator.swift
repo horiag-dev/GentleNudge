@@ -10,7 +10,7 @@ import SwiftData
 enum TranscriptItem: Identifiable, Sendable {
     case user(id: UUID, text: String)
     case assistant(id: UUID, text: String)
-    case reminderCard(id: UUID, reminderID: UUID, title: String, summary: String)
+    case reminderCard(id: UUID, reminderID: UUID, title: String, summary: String, snapshot: ReminderSnapshot)
     case notice(id: UUID, text: String)
 
     var id: UUID {
@@ -19,7 +19,7 @@ enum TranscriptItem: Identifiable, Sendable {
              .assistant(let id, _),
              .notice(let id, _):
             return id
-        case .reminderCard(let id, _, _, _):
+        case .reminderCard(let id, _, _, _, _):
             return id
         }
     }
@@ -65,6 +65,12 @@ final class ChatCoordinator {
     /// Reserved for streaming (increment 2b / Phase 2); always nil for now.
     var streamingText: String?
 
+    /// The most recent retryable/authoritative transport error, surfaced by
+    /// `ChatView` as an inline banner (with a Retry that resumes the idempotent
+    /// turn). Non-retryable outcomes (refusal, truncation, loop cap) stay plain
+    /// `.notice` transcript items instead.
+    private(set) var lastError: ChatError?
+
     /// Confirmation gate for `create_category`. Defaults to deny until 2b wires
     /// an Approve/Cancel card. Returns true to approve creation.
     var categoryApprovalHook: @Sendable (_ name: String) async -> Bool = { _ in false }
@@ -100,6 +106,7 @@ final class ChatCoordinator {
         runTask?.cancel()
         currentGeneration += 1
         let generation = currentGeneration
+        lastError = nil
 
         // A cancelled prior turn can leave a dangling assistant tool_use with no
         // tool_result. Drop it so the wire history stays valid.
@@ -124,6 +131,39 @@ final class ChatCoordinator {
         transcript.removeAll()
         isRunning = false
         streamingText = nil
+        lastError = nil
+    }
+
+    /// Idempotent retry after a transport failure. Resumes the current turn on the
+    /// existing wire history **without** re-appending the user message: any
+    /// tool_use/tool_result pair already in history is not re-executed, and a
+    /// first-request failure simply re-sends the pending user message. This is the
+    /// path the error banner's Retry uses.
+    func retry() {
+        guard !isRunning, !wireMessages.isEmpty else { return }
+        runTask?.cancel()
+        currentGeneration += 1
+        let generation = currentGeneration
+        lastError = nil
+        streamingText = nil
+        // Defensive: never send a dangling assistant tool_use as the tail.
+        sanitizeWireTail()
+        guard !wireMessages.isEmpty else { return }
+        isRunning = true
+        runTask = Task { [weak self] in
+            await self?.executeTurn(generation: generation)
+        }
+    }
+
+    func clearError() {
+        lastError = nil
+    }
+
+    /// Removes a chat-created reminder through the isolated repository (honoring
+    /// the recurring-successor unwind). Card Undo/Delete route here; the card's
+    /// dynamic `@Query` then collapses to its "Removed" state.
+    func deleteReminder(id: UUID) async {
+        await repository.deleteReminder(id: id)
     }
 
     // MARK: Agentic loop
@@ -146,7 +186,7 @@ final class ChatCoordinator {
             do {
                 response = try await sendWithRetry(request)
             } catch {
-                finishWithNotice(noticeText(for: error), generation: generation)
+                finishWithError(error, generation: generation)
                 return
             }
 
@@ -257,12 +297,15 @@ final class ChatCoordinator {
             }
             let result = await repository.createReminder(parsed, timeZone: context.timeZone)
             let card: TranscriptItem? = {
-                guard !result.isError, let reminderID = result.reminderID else { return nil }
+                guard !result.isError,
+                      let reminderID = result.reminderID,
+                      let snapshot = result.snapshot else { return nil }
                 return .reminderCard(
                     id: UUID(),
                     reminderID: reminderID,
                     title: result.displayTitle ?? parsed.title,
-                    summary: result.displaySummary ?? ""
+                    summary: result.displaySummary ?? "",
+                    snapshot: snapshot
                 )
             }()
             return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
@@ -413,26 +456,12 @@ final class ChatCoordinator {
         isRunning = false
     }
 
-    private func noticeText(for error: Error) -> String {
-        guard let error = error as? AnthropicError else {
-            return "Something went wrong. Please try again."
-        }
-        switch error {
-        case .notConfigured:
-            return "Add your Claude API key in Settings to use the assistant."
-        case .authenticationFailed:
-            return "Your Claude API key was rejected. Check it in Settings."
-        case .rateLimited:
-            return "The assistant is rate limited right now. Please try again shortly."
-        case .serverError, .apiError:
-            return "The assistant is temporarily unavailable. Please try again."
-        case .badRequest:
-            return "The assistant couldn't process that request."
-        case .network:
-            return "Couldn't reach the assistant. Check your connection and try again."
-        case .invalidURL, .invalidResponse, .decoding:
-            return "Something went wrong talking to the assistant. Please try again."
-        }
+    /// Surface a transport failure as a retryable banner (`lastError`) rather than
+    /// a plain notice, so `ChatView` can offer a Retry / Settings affordance.
+    private func finishWithError(_ error: Error, generation: Int) {
+        guard generation == currentGeneration else { return }
+        lastError = ChatError(error)
+        isRunning = false
     }
 
     // MARK: Tool input parsing
@@ -519,6 +548,72 @@ struct TurnContext {
 struct CategorySnapshot: Sendable {
     let id: UUID
     let name: String
+}
+
+// MARK: - Banner error
+
+/// A UI-facing transport error surfaced as an inline banner. `isRetryable` gates
+/// whether the banner offers Retry (network/rate-limit/server/generic) versus a
+/// Settings deep link (missing/rejected key).
+struct ChatError: Identifiable, Sendable {
+    enum Kind: Sendable {
+        case notConfigured
+        case authentication
+        case rateLimited
+        case network
+        case server
+        case generic
+    }
+
+    let id = UUID()
+    let kind: Kind
+    let message: String
+
+    var isRetryable: Bool {
+        switch kind {
+        case .notConfigured, .authentication: return false
+        case .rateLimited, .network, .server, .generic: return true
+        }
+    }
+
+    /// True when the recovery is a Settings deep link rather than a retry.
+    var needsSettings: Bool {
+        switch kind {
+        case .notConfigured, .authentication: return true
+        default: return false
+        }
+    }
+
+    init(_ error: Error) {
+        guard let anthropic = error as? AnthropicError else {
+            kind = .generic
+            message = "Something went wrong. Please try again."
+            return
+        }
+        switch anthropic {
+        case .notConfigured:
+            kind = .notConfigured
+            message = "Add your Claude API key in Settings to use the assistant."
+        case .authenticationFailed:
+            kind = .authentication
+            message = "Your Claude API key was rejected. Check it in Settings."
+        case .rateLimited:
+            kind = .rateLimited
+            message = "The assistant is rate limited right now. Try again in a moment."
+        case .serverError, .apiError:
+            kind = .server
+            message = "The assistant is temporarily unavailable. Please try again."
+        case .badRequest:
+            kind = .generic
+            message = "The assistant couldn't process that request."
+        case .network:
+            kind = .network
+            message = "Couldn't reach the assistant. Check your connection and try again."
+        case .invalidURL, .invalidResponse, .decoding:
+            kind = .generic
+            message = "Something went wrong talking to the assistant. Please try again."
+        }
+    }
 }
 
 // MARK: - Free helpers

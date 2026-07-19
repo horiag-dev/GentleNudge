@@ -11,6 +11,9 @@ struct RepositoryToolResult: Sendable {
     let reminderID: UUID?
     let displayTitle: String?
     let displaySummary: String?
+    /// The created reminder's values at creation time. Cards compare the live
+    /// reminder against this to decide Undo (still pristine) vs. Delete (changed).
+    let snapshot: ReminderSnapshot?
 
     static func failure(_ message: String) -> RepositoryToolResult {
         RepositoryToolResult(
@@ -18,8 +21,44 @@ struct RepositoryToolResult: Sendable {
             isError: true,
             reminderID: nil,
             displayTitle: nil,
-            displaySummary: nil
+            displaySummary: nil,
+            snapshot: nil
         )
+    }
+}
+
+/// An immutable capture of a reminder's mutable fields at creation time. A card's
+/// action is **Undo** only while the live reminder still matches this snapshot and
+/// carries no post-creation history (see `matchesCreation(_:)`); once anything has
+/// changed the action becomes a confirmed **Delete**.
+struct ReminderSnapshot: Sendable, Equatable {
+    let title: String
+    let notes: String
+    let dueDate: Date?
+    let categoryID: UUID?
+    let recurrenceRaw: Int
+    let recurrenceAnchorDay: Int?
+    let priorityRaw: Int
+}
+
+extension ReminderSnapshot {
+    /// True while the live reminder still matches its creation snapshot and has
+    /// accrued no post-creation state (completion, habit history, Apple-Reminders
+    /// sync linkage, or a spawned recurring successor). When false, removal is
+    /// destructive and the card offers a confirmed Delete instead of Undo.
+    @MainActor
+    func matchesCreation(_ r: Reminder) -> Bool {
+        !r.isCompleted
+            && r.habitCompletionDates.isEmpty
+            && !r.hasBeenSynced
+            && r.nextOccurrenceID == nil
+            && r.title == title
+            && r.notes == notes
+            && r.dueDate == dueDate
+            && r.category?.id == categoryID
+            && r.recurrenceRaw == recurrenceRaw
+            && r.recurrenceAnchorDay == recurrenceAnchorDay
+            && r.priorityRaw == priorityRaw
     }
 }
 
@@ -141,13 +180,44 @@ actor ReminderRepository {
             recurrence: recurrenceDescription,
             priority: priority
         )
+        let snapshot = ReminderSnapshot(
+            title: reminder.title,
+            notes: reminder.notes,
+            dueDate: reminder.dueDate,
+            categoryID: category.id,
+            recurrenceRaw: reminder.recurrenceRaw,
+            recurrenceAnchorDay: reminder.recurrenceAnchorDay,
+            priorityRaw: reminder.priorityRaw
+        )
         return RepositoryToolResult(
             content: content,
             isError: false,
             reminderID: reminder.id,
             displayTitle: reminder.title,
-            displaySummary: summary
+            displaySummary: summary,
+            snapshot: snapshot
         )
+    }
+
+    // MARK: Undo / Delete (card actions)
+
+    /// Removes a chat-created reminder through this isolated context. If the
+    /// reminder had been completed and spawned a recurring successor, undo that
+    /// first (`uncomplete(in:)`) so we never orphan a pristine future occurrence.
+    /// A no-op if the reminder has already vanished.
+    func deleteReminder(id: UUID) {
+        var descriptor = FetchDescriptor<Reminder>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        guard let reminder = try? modelContext.fetch(descriptor).first else { return }
+        if reminder.nextOccurrenceID != nil {
+            reminder.uncomplete(in: modelContext)
+        }
+        modelContext.delete(reminder)
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+        }
     }
 
     // MARK: create_category (called only after the coordinator's approval gate)
@@ -193,7 +263,8 @@ actor ReminderRepository {
             isError: false,
             reminderID: nil,
             displayTitle: category.name,
-            displaySummary: "Category"
+            displaySummary: "Category",
+            snapshot: nil
         )
     }
 
