@@ -7,6 +7,7 @@ struct TodayView: View {
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
     @State private var searchText = ""
+    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
 
     // MARK: - Categorized Reminders (computed from @Query for full reactivity)
 
@@ -37,7 +38,10 @@ struct TodayView: View {
             guard filterBlock(reminder) else { continue }
 
             if reminder.isHabit {
-                habits.append(reminder)
+                // Habits never join the other buckets; only surface them when enabled
+                if showHabits {
+                    habits.append(reminder)
+                }
                 continue
             }
 

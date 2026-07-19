@@ -37,6 +37,13 @@ enum Constants {
     // MARK: - Apple Reminders
     static let appleRemindersListName = "Gentle Nudge"
 
+    // MARK: - UserDefaults Keys
+    enum DefaultsKeys {
+        /// Whether habit UI (daily checklist, Habits smart list) is shown.
+        /// Defaults to true; habit data is kept either way.
+        static let showHabits = "showHabits"
+    }
+
     // MARK: - UI
     enum Spacing {
         static let xxs: CGFloat = 4

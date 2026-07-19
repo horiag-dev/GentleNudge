@@ -14,6 +14,7 @@ struct MacContentView: View {
     @State private var showingAddReminder = false
     @State private var showingSettings = false
     @State private var searchText = ""
+    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
 
     enum SidebarItem: Hashable {
         case today
@@ -153,13 +154,15 @@ struct MacContentView: View {
                         isSelected: selectedSidebarItem == .recurring
                     ) { selectedSidebarItem = .recurring }
 
-                    SmartListCard(
-                        icon: "leaf.circle.fill",
-                        color: .teal,
-                        title: "Habits",
-                        count: habitReminders.count,
-                        isSelected: selectedSidebarItem == .habits
-                    ) { selectedSidebarItem = .habits }
+                    if showHabits {
+                        SmartListCard(
+                            icon: "leaf.circle.fill",
+                            color: .teal,
+                            title: "Habits",
+                            count: habitReminders.count,
+                            isSelected: selectedSidebarItem == .habits
+                        ) { selectedSidebarItem = .habits }
+                    }
 
                     SmartListCard(
                         icon: "checkmark.circle.fill",
@@ -266,6 +269,12 @@ struct MacContentView: View {
         .sheet(isPresented: $showingSettings) {
             MacSettingsSheet()
         }
+        .onChange(of: showHabits) { _, isShown in
+            // Don't leave the hidden Habits list selected
+            if !isShown && selectedSidebarItem == .habits {
+                selectedSidebarItem = .today
+            }
+        }
     }
 
     // MARK: - Today List View (matches iOS TodayView order)
@@ -274,7 +283,7 @@ struct MacContentView: View {
         ScrollView {
             LazyVStack(spacing: 16) {
                 // Habits Section
-                if !habitReminders.isEmpty {
+                if showHabits && !habitReminders.isEmpty {
                     MacSectionCard(title: "Habits", icon: "leaf.circle.fill", color: .teal) {
                         // Progress bar
                         let completed = habitReminders.filter { $0.isCompletedToday }.count
@@ -428,7 +437,7 @@ struct MacContentView: View {
         case .completed:
             return completedReminders
         case .habits:
-            return habitReminders
+            return showHabits ? habitReminders : []
         case .category(let cat):
             return remindersForCategory(cat)
         case .none:

@@ -36,6 +36,7 @@ struct SettingsView: View {
 
     @State private var showingOnboarding = false
     @State private var showAdvancedSettings = false
+    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
     @State private var showingDebugInfo = false
     @State private var debugInfoMessage = ""
     @State private var isPullingFromiCloud = false
@@ -134,6 +135,17 @@ struct SettingsView: View {
                     Text("Get a morning reminder of items that need attention. The notification shows overdue items, items due today, and high priority tasks.")
                 }
                 #endif
+
+                // MARK: - Display
+                Section {
+                    Toggle(isOn: $showHabits) {
+                        Label("Show Habits", systemImage: "leaf.circle.fill")
+                    }
+                } header: {
+                    Text("Display")
+                } footer: {
+                    Text("Show the daily habits checklist and the Habits list. Turning this off hides habits everywhere without deleting them — your habit history is kept.")
+                }
 
                 // MARK: - Manage
                 Section {
