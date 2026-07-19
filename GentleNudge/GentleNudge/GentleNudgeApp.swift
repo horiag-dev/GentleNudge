@@ -34,13 +34,17 @@ struct GentleNudgeApp: App {
             cloudKitDatabase: .none
         )
 
-        // Helper to delete corrupted database if needed
+        // Helper to delete corrupted database if needed.
+        // Only ever call this as a LAST resort (after the local configuration has
+        // also failed) — deleting the store destroys the user's data.
         func deleteLocalStore() {
             let fileManager = FileManager.default
             #if os(macOS)
             if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-                let storeURL = appSupport.appendingPathComponent("default.store")
-                try? fileManager.removeItem(at: storeURL)
+                // Remove the store and its SQLite sidecar files
+                for suffix in ["default.store", "default.store-shm", "default.store-wal"] {
+                    try? fileManager.removeItem(at: appSupport.appendingPathComponent(suffix))
+                }
                 print("Deleted local store for fresh start")
             }
             #endif
@@ -87,10 +91,10 @@ struct GentleNudgeApp: App {
                 print("NSError userInfo: \(nsError.userInfo)")
             }
 
-            // If there's a migration issue, try deleting the local store
-            deleteLocalStore()
-
-            do {
+            // Fall back to local storage WITHOUT deleting the store first — a
+            // CloudKit init failure (entitlements, account issues) doesn't mean
+            // the local data is corrupted, and deleting it would lose user data.
+            func makeLocalContainer() throws -> ModelContainer {
                 let container = try ModelContainer(for: schema, configurations: [localConfig])
                 print("Using local storage (CloudKit unavailable)")
                 AppState.shared.storageMode = .local
@@ -114,31 +118,44 @@ struct GentleNudgeApp: App {
                 }
 
                 return container
-            } catch {
-                // Last resort: in-memory storage
-                print("Local storage failed: \(error)")
-                print("Falling back to in-memory storage (data will not persist)")
+            }
 
-                let memoryConfig = ModelConfiguration(
-                    schema: schema,
-                    isStoredInMemoryOnly: true
-                )
+            do {
+                return try makeLocalContainer()
+            } catch {
+                // The store itself may be corrupted or unmigratable — delete it
+                // as a last resort and retry once with a fresh store.
+                print("Local storage failed: \(error)")
+                deleteLocalStore()
 
                 do {
-                    let container = try ModelContainer(for: schema, configurations: [memoryConfig])
-                    AppState.shared.storageMode = .memory
-
-                    Task { @MainActor in
-                        let context = container.mainContext
-                        for defaultCategory in Category.defaults {
-                            context.insert(defaultCategory)
-                        }
-                        try? context.save()
-                    }
-
-                    return container
+                    return try makeLocalContainer()
                 } catch {
-                    fatalError("Could not create any ModelContainer: \(error)")
+                    // Last resort: in-memory storage
+                    print("Local storage failed after reset: \(error)")
+                    print("Falling back to in-memory storage (data will not persist)")
+
+                    let memoryConfig = ModelConfiguration(
+                        schema: schema,
+                        isStoredInMemoryOnly: true
+                    )
+
+                    do {
+                        let container = try ModelContainer(for: schema, configurations: [memoryConfig])
+                        AppState.shared.storageMode = .memory
+
+                        Task { @MainActor in
+                            let context = container.mainContext
+                            for defaultCategory in Category.defaults {
+                                context.insert(defaultCategory)
+                            }
+                            try? context.save()
+                        }
+
+                        return container
+                    } catch {
+                        fatalError("Could not create any ModelContainer: \(error)")
+                    }
                 }
             }
         }

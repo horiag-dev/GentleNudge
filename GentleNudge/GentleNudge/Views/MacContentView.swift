@@ -14,6 +14,7 @@ struct MacContentView: View {
     @State private var showingAddReminder = false
     @State private var showingSettings = false
     @State private var searchText = ""
+    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
 
     enum SidebarItem: Hashable {
         case today
@@ -78,8 +79,8 @@ struct MacContentView: View {
         reminders.filter { $0.isRecurring && !$0.isCompleted }
             .sorted { r1, r2 in
                 // Sort by recurrence frequency (daily first) then by next due date
-                if r1.recurrence.rawValue != r2.recurrence.rawValue {
-                    return r1.recurrence.rawValue < r2.recurrence.rawValue
+                if r1.recurrence.sortOrder != r2.recurrence.sortOrder {
+                    return r1.recurrence.sortOrder < r2.recurrence.sortOrder
                 }
                 return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
             }
@@ -153,13 +154,15 @@ struct MacContentView: View {
                         isSelected: selectedSidebarItem == .recurring
                     ) { selectedSidebarItem = .recurring }
 
-                    SmartListCard(
-                        icon: "leaf.circle.fill",
-                        color: .teal,
-                        title: "Habits",
-                        count: habitReminders.count,
-                        isSelected: selectedSidebarItem == .habits
-                    ) { selectedSidebarItem = .habits }
+                    if showHabits {
+                        SmartListCard(
+                            icon: "leaf.circle.fill",
+                            color: .teal,
+                            title: "Habits",
+                            count: habitReminders.count,
+                            isSelected: selectedSidebarItem == .habits
+                        ) { selectedSidebarItem = .habits }
+                    }
 
                     SmartListCard(
                         icon: "checkmark.circle.fill",
@@ -266,6 +269,12 @@ struct MacContentView: View {
         .sheet(isPresented: $showingSettings) {
             MacSettingsSheet()
         }
+        .onChange(of: showHabits) { _, isShown in
+            // Don't leave the hidden Habits list selected
+            if !isShown && selectedSidebarItem == .habits {
+                selectedSidebarItem = .today
+            }
+        }
     }
 
     // MARK: - Today List View (matches iOS TodayView order)
@@ -273,8 +282,23 @@ struct MacContentView: View {
     private var todayListView: some View {
         ScrollView {
             LazyVStack(spacing: 16) {
+                // All-clear state
+                if (!showHabits || habitReminders.isEmpty)
+                    && needsAttentionReminders.isEmpty
+                    && categoriesWithReminders.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.tertiary)
+                        Text("All caught up!")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 80)
+                }
+
                 // Habits Section
-                if !habitReminders.isEmpty {
+                if showHabits && !habitReminders.isEmpty {
                     MacSectionCard(title: "Habits", icon: "leaf.circle.fill", color: .teal) {
                         // Progress bar
                         let completed = habitReminders.filter { $0.isCompletedToday }.count
@@ -428,7 +452,7 @@ struct MacContentView: View {
         case .completed:
             return completedReminders
         case .habits:
-            return habitReminders
+            return showHabits ? habitReminders : []
         case .category(let cat):
             return remindersForCategory(cat)
         case .none:
@@ -699,11 +723,21 @@ struct MacReminderRow: View {
     }
 
     private func formatDate(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
             return "Today"
         }
-        if Calendar.current.isDateInTomorrow(date) {
+        if calendar.isDateInTomorrow(date) {
             return "Tomorrow"
+        }
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+        // Overdue: relative wording is clearer than a bare past date
+        let today = calendar.startOfDay(for: Date())
+        let day = calendar.startOfDay(for: date)
+        if day < today, let days = calendar.dateComponents([.day], from: day, to: today).day {
+            return "\(days) days ago"
         }
         return date.formatted(date: .abbreviated, time: .omitted)
     }

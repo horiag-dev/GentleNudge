@@ -7,6 +7,7 @@ struct TodayView: View {
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
     @State private var searchText = ""
+    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
 
     // MARK: - Categorized Reminders (computed from @Query for full reactivity)
 
@@ -16,6 +17,12 @@ struct TodayView: View {
         let upcoming: [Reminder]
         let needsAttentionByCategory: [(category: Category?, reminders: [Reminder])]
         let byCategory: [UUID: [Reminder]]
+        let uncategorized: [Reminder]
+
+        var isEmpty: Bool {
+            habits.isEmpty && needsAttention.isEmpty && upcoming.isEmpty
+                && byCategory.isEmpty && uncategorized.isEmpty
+        }
     }
 
     private var categorizedReminders: CategorizedReminders {
@@ -31,13 +38,17 @@ struct TodayView: View {
         var needsAttention: [Reminder] = []
         var upcoming: [Reminder] = []
         var byCategory: [UUID: [Reminder]] = [:]
+        var uncategorized: [Reminder] = []
 
         for reminder in reminders {
             guard !reminder.isCompleted else { continue }
             guard filterBlock(reminder) else { continue }
 
             if reminder.isHabit {
-                habits.append(reminder)
+                // Habits never join the other buckets; only surface them when enabled
+                if showHabits {
+                    habits.append(reminder)
+                }
                 continue
             }
 
@@ -59,10 +70,14 @@ struct TodayView: View {
                 upcoming.append(reminder)
             } else if let categoryId = reminder.category?.id {
                 byCategory[categoryId, default: []].append(reminder)
+            } else {
+                // Items without a category (e.g. imported) must still be visible
+                uncategorized.append(reminder)
             }
         }
 
         habits.sort { $0.title < $1.title }
+        uncategorized.sort { $0.createdAt > $1.createdAt }
         needsAttention.sort { r1, r2 in
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
             if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
@@ -91,7 +106,8 @@ struct TodayView: View {
             needsAttention: needsAttention,
             upcoming: upcoming,
             needsAttentionByCategory: needsAttentionByCategory,
-            byCategory: byCategory
+            byCategory: byCategory,
+            uncategorized: uncategorized
         )
     }
 
@@ -187,18 +203,28 @@ struct TodayView: View {
                         }
                     }
 
-                    // Empty state when searching
-                    if !searchText.isEmpty &&
-                       data.habits.isEmpty &&
-                       data.needsAttention.isEmpty &&
-                       data.upcoming.isEmpty &&
-                       data.byCategory.isEmpty {
-                        ContentUnavailableView(
-                            "No Results",
-                            systemImage: "magnifyingglass",
-                            description: Text("No reminders match \"\(searchText)\"")
-                        )
-                        .padding(.top, Constants.Spacing.xl)
+                    // Items without a category (e.g. imported) — keep them visible
+                    if !data.uncategorized.isEmpty {
+                        UncategorizedSection(reminders: data.uncategorized)
+                    }
+
+                    // Empty states
+                    if data.isEmpty {
+                        if searchText.isEmpty {
+                            ContentUnavailableView(
+                                "All Caught Up",
+                                systemImage: "checkmark.circle",
+                                description: Text("Nothing needs your attention right now. Tap + to add a reminder.")
+                            )
+                            .padding(.top, Constants.Spacing.xl)
+                        } else {
+                            ContentUnavailableView(
+                                "No Results",
+                                systemImage: "magnifyingglass",
+                                description: Text("No reminders match \"\(searchText)\"")
+                            )
+                            .padding(.top, Constants.Spacing.xl)
+                        }
                     }
                 }
                 .padding()
@@ -331,7 +357,7 @@ struct HabitRow: View {
             }
 
             #if os(iOS)
-            // Mini heatmap (last 7 days)
+            // Mini heatmap (last 14 days)
             HabitMiniHeatmap(habit: habit)
             #endif
         }
@@ -570,7 +596,10 @@ struct NeedsAttentionRow: View {
         .background(AppColors.background)
         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
         .sheet(isPresented: $showingDetail) {
-            ReminderDetailView(reminder: reminder)
+            NavigationStack {
+                ReminderDetailView(reminder: reminder)
+            }
+            .presentationDetents([.medium, .large])
         }
     }
 
@@ -586,11 +615,21 @@ struct NeedsAttentionRow: View {
     }
 
     private func formatDate(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
             return "Today"
         }
-        if Calendar.current.isDateInTomorrow(date) {
+        if calendar.isDateInTomorrow(date) {
             return "Tomorrow"
+        }
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+        // Overdue: relative wording is clearer than a bare past date
+        let today = calendar.startOfDay(for: Date())
+        let day = calendar.startOfDay(for: date)
+        if day < today, let days = calendar.dateComponents([.day], from: day, to: today).day {
+            return "\(days) days ago"
         }
         return date.formatted(date: .abbreviated, time: .omitted)
     }
@@ -599,6 +638,38 @@ struct NeedsAttentionRow: View {
         if date < Date() { return .red }
         if Calendar.current.isDateInToday(date) { return .orange }
         return .secondary
+    }
+}
+
+// MARK: - Uncategorized Section
+
+struct UncategorizedSection: View {
+    let reminders: [Reminder]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
+            HStack(spacing: Constants.Spacing.xs) {
+                Image(systemName: "questionmark.folder.fill")
+                    .foregroundStyle(.gray)
+                Text("Uncategorized")
+                    .font(.headline)
+                Spacer()
+                Text("\(reminders.count)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 4) {
+                ForEach(reminders) { reminder in
+                    ReminderRow(reminder: reminder)
+                }
+            }
+        }
+        .padding(Constants.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
+                .fill(Color.gray.opacity(0.10))
+        )
     }
 }
 

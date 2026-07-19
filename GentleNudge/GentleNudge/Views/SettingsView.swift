@@ -36,6 +36,7 @@ struct SettingsView: View {
 
     @State private var showingOnboarding = false
     @State private var showAdvancedSettings = false
+    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
     @State private var showingDebugInfo = false
     @State private var debugInfoMessage = ""
     @State private var isPullingFromiCloud = false
@@ -134,6 +135,17 @@ struct SettingsView: View {
                     Text("Get a morning reminder of items that need attention. The notification shows overdue items, items due today, and high priority tasks.")
                 }
                 #endif
+
+                // MARK: - Display
+                Section {
+                    Toggle(isOn: $showHabits) {
+                        Label("Show Habits", systemImage: "leaf.circle.fill")
+                    }
+                } header: {
+                    Text("Display")
+                } footer: {
+                    Text("Show the daily habits checklist and the Habits list. Turning this off hides habits everywhere without deleting them — your habit history is kept.")
+                }
 
                 // MARK: - Manage
                 Section {
@@ -746,21 +758,11 @@ struct SettingsView: View {
             }
 
             if !hasActiveOccurrence {
-                // Create the next occurrence from the completed reminder
+                // Create the next occurrence from the completed reminder.
+                // createNextOccurrence() already advances past today while
+                // preserving the schedule's anchor, so no extra adjustment needed.
                 if let nextReminder = reminder.createNextOccurrence() {
-                    // Adjust the due date to be in the future if needed
-                    var adjustedReminder = nextReminder
-
-                    // Keep advancing until the due date is in the future
-                    while let dueDate = adjustedReminder.dueDate, dueDate < Date() {
-                        if let advancedReminder = adjustedReminder.createNextOccurrence() {
-                            adjustedReminder = advancedReminder
-                        } else {
-                            break
-                        }
-                    }
-
-                    modelContext.insert(adjustedReminder)
+                    modelContext.insert(nextReminder)
                     recoveredCount += 1
                 }
             }
@@ -942,8 +944,10 @@ struct SettingsView: View {
                 // Touch all reminders to trigger CloudKit sync
                 // This forces CloudKit to re-evaluate all records
                 for reminder in reminders {
-                    // Update a non-visible property to trigger sync
-                    reminder.hasBeenSynced = true
+                    // Self-assign to mark dirty without changing data.
+                    // (Never set hasBeenSynced = true here — that flag means
+                    // "synced to Apple Reminders" and must stay accurate.)
+                    reminder.hasBeenSynced = reminder.hasBeenSynced
                 }
 
                 // Touch all categories too
