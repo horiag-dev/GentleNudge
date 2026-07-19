@@ -60,25 +60,31 @@ struct GentleNudgeApp: App {
             // Use UserDefaults to track if THIS device has already set up defaults
             // This prevents duplicates when CloudKit syncs from other devices
             Task { @MainActor in
-                let hasCreatedDefaults = UserDefaults.standard.bool(forKey: "hasCreatedDefaultCategories")
-                guard !hasCreatedDefaults else { return }
-
-                // Wait a moment for CloudKit to sync
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-
                 let context = container.mainContext
-                let descriptor = FetchDescriptor<Category>()
-                let existingCategories = try? context.fetch(descriptor)
 
-                // Only create defaults if still empty after sync delay
-                if existingCategories?.isEmpty ?? true {
-                    for defaultCategory in Category.defaults {
-                        context.insert(defaultCategory)
+                let hasCreatedDefaults = UserDefaults.standard.bool(forKey: "hasCreatedDefaultCategories")
+                if !hasCreatedDefaults {
+                    // Wait a moment for CloudKit to sync
+                    try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+
+                    let descriptor = FetchDescriptor<Category>()
+                    let existingCategories = try? context.fetch(descriptor)
+
+                    // Only create defaults if still empty after sync delay
+                    if existingCategories?.isEmpty ?? true {
+                        for defaultCategory in Category.defaults {
+                            context.insert(defaultCategory)
+                        }
+                        try? context.save()
                     }
-                    try? context.save()
+
+                    UserDefaults.standard.set(true, forKey: "hasCreatedDefaultCategories")
                 }
 
-                UserDefaults.standard.set(true, forKey: "hasCreatedDefaultCategories")
+                // One-time backfill: mark a pre-existing "Habits" category so habit
+                // identity keys off the stable marker instead of a name match.
+                // Runs even for stores seeded before isHabitCategory existed.
+                Category.backfillHabitMarker(in: context)
             }
 
             return container
@@ -100,21 +106,26 @@ struct GentleNudgeApp: App {
                 AppState.shared.storageMode = .local
 
                 Task { @MainActor in
-                    let hasCreatedDefaults = UserDefaults.standard.bool(forKey: "hasCreatedDefaultCategories")
-                    guard !hasCreatedDefaults else { return }
-
                     let context = container.mainContext
-                    let descriptor = FetchDescriptor<Category>()
-                    let existingCategories = try? context.fetch(descriptor)
 
-                    if existingCategories?.isEmpty ?? true {
-                        for defaultCategory in Category.defaults {
-                            context.insert(defaultCategory)
+                    let hasCreatedDefaults = UserDefaults.standard.bool(forKey: "hasCreatedDefaultCategories")
+                    if !hasCreatedDefaults {
+                        let descriptor = FetchDescriptor<Category>()
+                        let existingCategories = try? context.fetch(descriptor)
+
+                        if existingCategories?.isEmpty ?? true {
+                            for defaultCategory in Category.defaults {
+                                context.insert(defaultCategory)
+                            }
+                            try? context.save()
                         }
-                        try? context.save()
+
+                        UserDefaults.standard.set(true, forKey: "hasCreatedDefaultCategories")
                     }
 
-                    UserDefaults.standard.set(true, forKey: "hasCreatedDefaultCategories")
+                    // One-time backfill: mark a pre-existing "Habits" category
+                    // (stores seeded before isHabitCategory existed). Idempotent.
+                    Category.backfillHabitMarker(in: context)
                 }
 
                 return container

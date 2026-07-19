@@ -223,7 +223,9 @@ final class Reminder {
     }
 
     var isHabit: Bool {
-        category?.name == "Habits"
+        // Prefer the stable marker; keep a name fallback so nothing breaks in the
+        // window before the launch-time backfill (Category.backfillHabitMarker) runs.
+        (category?.isHabitCategory ?? false) || category?.name == "Habits"
     }
 
     var isOverdue: Bool {

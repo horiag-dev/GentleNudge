@@ -32,7 +32,31 @@ enum Constants {
     }
 
     static let claudeAPIURL = "https://api.anthropic.com/v1/messages"
-    static let claudeModel = "claude-sonnet-4-20250514"
+
+    /// Model for the existing AI enhancement (reminder polish) feature.
+    /// Was `claude-sonnet-4-20250514`, which was retired on 2026-06-15; replaced
+    /// with its official successor, `claude-sonnet-5`.
+    static let claudeModel = "claude-sonnet-5"
+
+    // MARK: - Chat Assistant
+    // User-configurable model + reasoning effort for the conversational chat
+    // assistant (later increments). Stored in UserDefaults; the Settings UI binds
+    // to these keys via @AppStorage, and app code reads the resolved values below.
+
+    static let defaultChatModel = ChatModel.opus
+    static let defaultReasoningEffort = ReasoningEffort.high
+
+    /// The user-selected chat model (defaults to Claude Opus 4.8).
+    static var chatModel: ChatModel {
+        UserDefaults.standard.string(forKey: DefaultsKeys.chatModel)
+            .flatMap(ChatModel.init(rawValue:)) ?? defaultChatModel
+    }
+
+    /// The user-selected reasoning effort (defaults to `high`).
+    static var reasoningEffort: ReasoningEffort {
+        UserDefaults.standard.string(forKey: DefaultsKeys.reasoningEffort)
+            .flatMap(ReasoningEffort.init(rawValue:)) ?? defaultReasoningEffort
+    }
 
     // MARK: - Apple Reminders
     static let appleRemindersListName = "Gentle Nudge"
@@ -42,6 +66,12 @@ enum Constants {
         /// Whether habit UI (daily checklist, Habits smart list) is shown.
         /// Defaults to true; habit data is kept either way.
         static let showHabits = "showHabits"
+
+        /// Chat assistant model (raw value of `ChatModel`).
+        static let chatModel = "chatModel"
+
+        /// Chat assistant reasoning effort (raw value of `ReasoningEffort`).
+        static let reasoningEffort = "reasoningEffort"
     }
 
     // MARK: - UI
@@ -65,6 +95,46 @@ enum Constants {
         static let quick = SwiftUI.Animation.easeInOut(duration: 0.2)
         static let standard = SwiftUI.Animation.easeInOut(duration: 0.3)
         static let spring = SwiftUI.Animation.spring(response: 0.4, dampingFraction: 0.7)
+    }
+}
+
+// MARK: - Chat Assistant Options
+
+/// Selectable models for the conversational chat assistant. Raw value is the
+/// Anthropic model ID sent to the API.
+enum ChatModel: String, CaseIterable, Identifiable {
+    case opus = "claude-opus-4-8"
+    case sonnet = "claude-sonnet-5"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .opus: return "Claude Opus 4.8"
+        case .sonnet: return "Claude Sonnet 5"
+        }
+    }
+}
+
+/// Reasoning effort for the chat assistant. Raw value maps to the API's
+/// `output_config.effort`.
+enum ReasoningEffort: String, CaseIterable, Identifiable {
+    case low
+    case medium
+    case high
+    case xhigh
+    case max
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .low: return "Low"
+        case .medium: return "Medium"
+        case .high: return "High"
+        case .xhigh: return "Extra High"
+        case .max: return "Max"
+        }
     }
 }
 

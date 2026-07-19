@@ -10,6 +10,11 @@ final class Category: Identifiable {
     var isDefault: Bool = false
     var sortOrder: Int = 0
 
+    /// Stable marker that identifies the habits category, independent of its name.
+    /// Habit identity (`Reminder.isHabit`) keys off this rather than a fragile
+    /// `name == "Habits"` check. Has a default value for CloudKit compatibility.
+    var isHabitCategory: Bool = false
+
     @Relationship(deleteRule: .nullify, inverse: \Reminder.category)
     var reminders: [Reminder]?
 
@@ -19,7 +24,8 @@ final class Category: Identifiable {
         icon: String,
         colorName: String,
         isDefault: Bool = false,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        isHabitCategory: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -27,6 +33,7 @@ final class Category: Identifiable {
         self.colorName = colorName
         self.isDefault = isDefault
         self.sortOrder = sortOrder
+        self.isHabitCategory = isHabitCategory
     }
 
     var color: Color {
@@ -47,7 +54,7 @@ final class Category: Identifiable {
 
     static var defaults: [Category] {
         [
-            Category(name: "Habits", icon: "heart.circle.fill", colorName: "red", isDefault: true, sortOrder: 0),
+            Category(name: "Habits", icon: "heart.circle.fill", colorName: "red", isDefault: true, sortOrder: 0, isHabitCategory: true),
             Category(name: "Today", icon: "sun.max.fill", colorName: "yellow", isDefault: true, sortOrder: 1),
             Category(name: "House", icon: "house.fill", colorName: "green", isDefault: true, sortOrder: 2),
             Category(name: "Photos", icon: "photo.fill", colorName: "purple", isDefault: true, sortOrder: 3),
@@ -81,5 +88,21 @@ final class Category: Identifiable {
 
     static var availableColors: [String] {
         ["red", "orange", "yellow", "green", "blue", "purple", "pink", "teal", "indigo", "mint"]
+    }
+
+    /// One-time backfill for stores created before `isHabitCategory` existed:
+    /// stamps the marker onto the pre-existing "Habits" category so habit identity
+    /// no longer depends on a name match. Idempotent and safe to call on every
+    /// launch — a no-op when the Habits category is absent or already marked.
+    @MainActor
+    static func backfillHabitMarker(in context: ModelContext) {
+        var descriptor = FetchDescriptor<Category>(
+            predicate: #Predicate { $0.name == "Habits" }
+        )
+        descriptor.fetchLimit = 1
+        guard let habits = try? context.fetch(descriptor).first,
+              !habits.isHabitCategory else { return }
+        habits.isHabitCategory = true
+        try? context.save()
     }
 }

@@ -861,6 +861,24 @@ final class HabitTests: XCTestCase {
         XCTAssertFalse(reminder.isHabit)
     }
 
+    func test_isHabit_readsHabitCategoryMarker_ignoringName() {
+        // Marker set, name is NOT "Habits" — identity must key off the marker.
+        let renamedHabits = Category(name: "Daily Rituals", icon: "heart.circle.fill", colorName: "red", isHabitCategory: true)
+        let reminder = Reminder(title: "Exercise", category: renamedHabits)
+
+        XCTAssertTrue(reminder.isHabit)
+    }
+
+    func test_isHabit_defaultsCategoryHasMarker() {
+        // The seeded Habits default category carries the marker.
+        let habits = Category.defaults.first { $0.name == "Habits" }
+        XCTAssertNotNil(habits)
+        XCTAssertTrue(habits?.isHabitCategory ?? false)
+
+        let reminder = Reminder(title: "Meditate", category: habits)
+        XCTAssertTrue(reminder.isHabit)
+    }
+
     func test_isHabit_withNoCategory_returnsFalse() {
         let reminder = Reminder(title: "Task")
 

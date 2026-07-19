@@ -37,6 +37,8 @@ struct SettingsView: View {
     @State private var showingOnboarding = false
     @State private var showAdvancedSettings = false
     @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
+    @AppStorage(Constants.DefaultsKeys.chatModel) private var chatModel = Constants.defaultChatModel.rawValue
+    @AppStorage(Constants.DefaultsKeys.reasoningEffort) private var reasoningEffort = Constants.defaultReasoningEffort.rawValue
     @State private var showingDebugInfo = false
     @State private var debugInfoMessage = ""
     @State private var isPullingFromiCloud = false
@@ -214,6 +216,29 @@ struct SettingsView: View {
                     Text("AI Enhancement")
                 } footer: {
                     Text("Enter your Claude API key to enable AI features like reminder enhancement and category suggestions.")
+                }
+
+                // Assistant
+                Section {
+                    Picker(selection: $chatModel) {
+                        ForEach(ChatModel.allCases) { model in
+                            Text(model.displayName).tag(model.rawValue)
+                        }
+                    } label: {
+                        Label("Model", systemImage: "cpu")
+                    }
+
+                    Picker(selection: $reasoningEffort) {
+                        ForEach(ReasoningEffort.allCases) { effort in
+                            Text(effort.displayName).tag(effort.rawValue)
+                        }
+                    } label: {
+                        Label("Reasoning Effort", systemImage: "brain")
+                    }
+                } header: {
+                    Text("Assistant")
+                } footer: {
+                    Text("The assistant uses your own Claude API key (stored securely in the Keychain). Higher reasoning effort improves answers but uses more tokens.")
                 }
 
                 // Statistics
