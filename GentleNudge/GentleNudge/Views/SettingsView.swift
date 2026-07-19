@@ -746,21 +746,11 @@ struct SettingsView: View {
             }
 
             if !hasActiveOccurrence {
-                // Create the next occurrence from the completed reminder
+                // Create the next occurrence from the completed reminder.
+                // createNextOccurrence() already advances past today while
+                // preserving the schedule's anchor, so no extra adjustment needed.
                 if let nextReminder = reminder.createNextOccurrence() {
-                    // Adjust the due date to be in the future if needed
-                    var adjustedReminder = nextReminder
-
-                    // Keep advancing until the due date is in the future
-                    while let dueDate = adjustedReminder.dueDate, dueDate < Date() {
-                        if let advancedReminder = adjustedReminder.createNextOccurrence() {
-                            adjustedReminder = advancedReminder
-                        } else {
-                            break
-                        }
-                    }
-
-                    modelContext.insert(adjustedReminder)
+                    modelContext.insert(nextReminder)
                     recoveredCount += 1
                 }
             }
@@ -942,8 +932,10 @@ struct SettingsView: View {
                 // Touch all reminders to trigger CloudKit sync
                 // This forces CloudKit to re-evaluate all records
                 for reminder in reminders {
-                    // Update a non-visible property to trigger sync
-                    reminder.hasBeenSynced = true
+                    // Self-assign to mark dirty without changing data.
+                    // (Never set hasBeenSynced = true here — that flag means
+                    // "synced to Apple Reminders" and must stay accurate.)
+                    reminder.hasBeenSynced = reminder.hasBeenSynced
                 }
 
                 // Touch all categories too

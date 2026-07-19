@@ -6,6 +6,7 @@
 //
 
 import XCTest
+import SwiftData
 @testable import Gentle_Nudge_Mac
 
 // MARK: - Reminder isOverdue Tests
@@ -1184,5 +1185,243 @@ final class ReminderInitializationTests: XCTestCase {
         let reminder = Reminder(title: "Test")
 
         XCTAssertNotNil(reminder.createdAt)
+    }
+}
+
+// MARK: - Recurrence Anchor Tests (monthly on the 29th-31st)
+
+final class RecurrenceAnchorTests: XCTestCase {
+
+    private func date(year: Int, month: Int, day: Int) -> Date {
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        return Calendar.current.date(from: components)!
+    }
+
+    func test_monthlyNextDate_from31st_clampsToEndOfFebruary() {
+        let calendar = Calendar.current
+        let jan31 = date(year: 2027, month: 1, day: 31)
+
+        let next = RecurrenceType.monthly.nextDate(from: jan31, anchorDay: 31)
+
+        XCTAssertNotNil(next)
+        if let next {
+            XCTAssertEqual(calendar.component(.month, from: next), 2)
+            XCTAssertEqual(calendar.component(.day, from: next), 28) // 2027 is not a leap year
+        }
+    }
+
+    func test_monthlyNextDate_fromClampedFebruary_recoversAnchorDay() {
+        let calendar = Calendar.current
+        let feb28 = date(year: 2027, month: 2, day: 28)
+
+        let next = RecurrenceType.monthly.nextDate(from: feb28, anchorDay: 31)
+
+        XCTAssertNotNil(next)
+        if let next {
+            XCTAssertEqual(calendar.component(.month, from: next), 3)
+            XCTAssertEqual(calendar.component(.day, from: next), 31)
+        }
+    }
+
+    func test_monthlyNextDate_withoutAnchor_keepsClampedDay() {
+        let calendar = Calendar.current
+        let feb28 = date(year: 2027, month: 2, day: 28)
+
+        let next = RecurrenceType.monthly.nextDate(from: feb28)
+
+        XCTAssertNotNil(next)
+        if let next {
+            XCTAssertEqual(calendar.component(.month, from: next), 3)
+            XCTAssertEqual(calendar.component(.day, from: next), 28)
+        }
+    }
+
+    func test_quarterlyNextDate_recoversAnchorAfterShortMonth() {
+        let calendar = Calendar.current
+        let apr30 = date(year: 2027, month: 4, day: 30)
+
+        let next = RecurrenceType.quarterly.nextDate(from: apr30, anchorDay: 31)
+
+        XCTAssertNotNil(next)
+        if let next {
+            XCTAssertEqual(calendar.component(.month, from: next), 7)
+            XCTAssertEqual(calendar.component(.day, from: next), 31)
+        }
+    }
+
+    func test_createNextOccurrence_monthEnd_carriesAnchorToNextOccurrence() {
+        let calendar = Calendar.current
+        // Use a Jan 31 that's in the future so the schedule isn't overdue
+        let year = calendar.component(.year, from: Date()) + 1
+        let jan31 = date(year: year, month: 1, day: 31)
+
+        let reminder = Reminder(title: "Pay rent", dueDate: jan31, recurrence: .monthly)
+        let next = reminder.createNextOccurrence()
+
+        XCTAssertEqual(next?.recurrenceAnchorDay, 31)
+        if let nextDueDate = next?.dueDate {
+            XCTAssertEqual(calendar.component(.month, from: nextDueDate), 2)
+            // Clamped to the end of February
+            let febLength = calendar.range(of: .day, in: .month, for: nextDueDate)!.count
+            XCTAssertEqual(calendar.component(.day, from: nextDueDate), febLength)
+        }
+    }
+
+    func test_createNextOccurrence_clampedFebruaryWithAnchor_returnsToThe31st() {
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: Date()) + 1
+        let febLength = calendar.range(of: .day, in: .month, for: date(year: year, month: 2, day: 1))!.count
+        let febEnd = date(year: year, month: 2, day: febLength)
+
+        let reminder = Reminder(title: "Pay rent", dueDate: febEnd, recurrence: .monthly)
+        reminder.recurrenceAnchorDay = 31
+
+        let next = reminder.createNextOccurrence()
+
+        XCTAssertNotNil(next?.dueDate)
+        if let nextDueDate = next?.dueDate {
+            XCTAssertEqual(calendar.component(.month, from: nextDueDate), 3)
+            XCTAssertEqual(calendar.component(.day, from: nextDueDate), 31)
+        }
+    }
+
+    func test_createNextOccurrence_editedDueDate_ignoresStaleAnchor() {
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: Date()) + 1
+        // Mid-month due date with a stale month-end anchor (user edited the date)
+        let apr15 = date(year: year, month: 4, day: 15)
+
+        let reminder = Reminder(title: "Pay rent", dueDate: apr15, recurrence: .monthly)
+        reminder.recurrenceAnchorDay = 31
+
+        let next = reminder.createNextOccurrence()
+
+        if let nextDueDate = next?.dueDate {
+            XCTAssertEqual(calendar.component(.day, from: nextDueDate), 15)
+        }
+        XCTAssertEqual(next?.recurrenceAnchorDay, 15)
+    }
+}
+
+// MARK: - Overdue Recurring Anchor Tests
+
+final class OverdueRecurringAnchorTests: XCTestCase {
+
+    func test_createNextOccurrence_overdueWeekly_preservesWeekdayAnchor() {
+        let calendar = Calendar.current
+        let tenDaysAgo = calendar.date(byAdding: .day, value: -10, to: calendar.startOfDay(for: Date()))!
+
+        let reminder = Reminder(title: "Weekly review", dueDate: tenDaysAgo, recurrence: .weekly)
+        let next = reminder.createNextOccurrence()
+
+        XCTAssertNotNil(next?.dueDate)
+        if let nextDueDate = next?.dueDate {
+            // Same weekday as the original schedule (not re-based on today)
+            XCTAssertEqual(
+                calendar.component(.weekday, from: nextDueDate),
+                calendar.component(.weekday, from: tenDaysAgo)
+            )
+            // Strictly after today
+            XCTAssertTrue(calendar.startOfDay(for: nextDueDate) > calendar.startOfDay(for: Date()))
+        }
+    }
+
+    func test_createNextOccurrence_overdueMonthly_preservesDayAnchor() {
+        let calendar = Calendar.current
+        // Due on the 15th two months ago (a day that exists in every month)
+        var components = calendar.dateComponents(
+            [.year, .month],
+            from: calendar.date(byAdding: .month, value: -2, to: Date())!
+        )
+        components.day = 15
+        let pastDue = calendar.date(from: components)!
+
+        let reminder = Reminder(title: "Pay bill", dueDate: pastDue, recurrence: .monthly)
+        let next = reminder.createNextOccurrence()
+
+        XCTAssertNotNil(next?.dueDate)
+        if let nextDueDate = next?.dueDate {
+            XCTAssertEqual(calendar.component(.day, from: nextDueDate), 15)
+            XCTAssertTrue(calendar.startOfDay(for: nextDueDate) > calendar.startOfDay(for: Date()))
+        }
+    }
+
+    func test_createNextOccurrence_dueToday_returnsNextPeriod() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        let reminder = Reminder(title: "Weekly review", dueDate: today, recurrence: .weekly)
+        let next = reminder.createNextOccurrence()
+
+        if let nextDueDate = next?.dueDate {
+            let expected = calendar.date(byAdding: .day, value: 7, to: today)!
+            XCTAssertTrue(calendar.isDate(nextDueDate, inSameDayAs: expected))
+        }
+    }
+}
+
+// MARK: - Complete In Context Tests
+
+@MainActor
+final class CompleteInContextTests: XCTestCase {
+
+    private func makeContainer() throws -> ModelContainer {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        return try ModelContainer(for: Reminder.self, Category.self, configurations: config)
+    }
+
+    func test_complete_recurring_spawnsExactlyOneNextOccurrence() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let reminder = Reminder(title: "Water plants", dueDate: Date(), recurrence: .weekly)
+        context.insert(reminder)
+
+        reminder.complete(in: context)
+        reminder.complete(in: context) // second call must be a no-op
+
+        let all = try context.fetch(FetchDescriptor<Reminder>())
+        XCTAssertEqual(all.count, 2)
+        XCTAssertTrue(reminder.isCompleted)
+        XCTAssertNotNil(reminder.nextOccurrenceID)
+    }
+
+    func test_uncomplete_removesSpawnedNextOccurrence() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let reminder = Reminder(title: "Water plants", dueDate: Date(), recurrence: .weekly)
+        context.insert(reminder)
+
+        reminder.complete(in: context)
+        reminder.uncomplete(in: context)
+
+        let all = try context.fetch(FetchDescriptor<Reminder>())
+        XCTAssertEqual(all.count, 1)
+        XCTAssertFalse(reminder.isCompleted)
+        XCTAssertNil(reminder.nextOccurrenceID)
+    }
+
+    func test_complete_habit_marksDoneTodayWithoutPermanentCompletion() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let habitsCategory = Category(name: "Habits", icon: "heart.circle.fill", colorName: "red")
+        context.insert(habitsCategory)
+        let habit = Reminder(title: "Exercise", category: habitsCategory, recurrence: .daily)
+        context.insert(habit)
+
+        habit.complete(in: context)
+
+        XCTAssertFalse(habit.isCompleted, "Habits must never be permanently completed")
+        XCTAssertTrue(habit.isCompletedToday)
+        XCTAssertTrue(habit.wasCompletedOn(date: Date()))
+
+        // No duplicate reminder spawned
+        let all = try context.fetch(FetchDescriptor<Reminder>())
+        XCTAssertEqual(all.count, 1)
     }
 }

@@ -43,7 +43,25 @@ enum RecurrenceType: Int, Codable, CaseIterable {
         }
     }
 
-    func nextDate(from date: Date) -> Date? {
+    /// Ordering for display purposes, most frequent first. The raw values are
+    /// storage-only and NOT ordered by frequency (new cases were appended over
+    /// time), so never sort by `rawValue`.
+    var sortOrder: Int {
+        switch self {
+        case .daily: return 0
+        case .weekdays: return 1
+        case .weekends: return 2
+        case .weekly: return 3
+        case .biweekly: return 4
+        case .monthly: return 5
+        case .quarterly: return 6
+        case .semiannually: return 7
+        case .yearly: return 8
+        case .none: return 9
+        }
+    }
+
+    func nextDate(from date: Date, anchorDay: Int? = nil) -> Date? {
         let calendar = Calendar.current
         switch self {
         case .none:
@@ -73,14 +91,31 @@ enum RecurrenceType: Int, Codable, CaseIterable {
         case .biweekly:
             return calendar.date(byAdding: .weekOfYear, value: 2, to: date)
         case .monthly:
-            return calendar.date(byAdding: .month, value: 1, to: date)
+            return Self.addMonths(1, to: date, anchorDay: anchorDay)
         case .quarterly:
-            return calendar.date(byAdding: .month, value: 3, to: date)
+            return Self.addMonths(3, to: date, anchorDay: anchorDay)
         case .semiannually:
-            return calendar.date(byAdding: .month, value: 6, to: date)
+            return Self.addMonths(6, to: date, anchorDay: anchorDay)
         case .yearly:
-            return calendar.date(byAdding: .year, value: 1, to: date)
+            return Self.addMonths(12, to: date, anchorDay: anchorDay)
         }
+    }
+
+    /// Adds months, restoring the schedule's anchor day-of-month when a previous
+    /// occurrence was clamped by a shorter month. Without an anchor, "monthly on
+    /// the 31st" drifts permanently after February (Jan 31 → Feb 28 → Mar 28);
+    /// with anchorDay = 31 it recovers (Jan 31 → Feb 28 → Mar 31).
+    private static func addMonths(_ months: Int, to date: Date, anchorDay: Int?) -> Date? {
+        let calendar = Calendar.current
+        guard let advanced = calendar.date(byAdding: .month, value: months, to: date) else { return nil }
+        guard let anchorDay, anchorDay > calendar.component(.day, from: advanced) else { return advanced }
+
+        // Move the day up to the anchor, clamped to the target month's length.
+        let daysInMonth = calendar.range(of: .day, in: .month, for: advanced)?.count
+            ?? calendar.component(.day, from: advanced)
+        var components = calendar.dateComponents([.year, .month, .hour, .minute, .second], from: advanced)
+        components.day = min(anchorDay, daysInMonth)
+        return calendar.date(from: components) ?? advanced
     }
 }
 
@@ -139,6 +174,12 @@ final class Reminder {
     /// For recurring reminders: the id of the next occurrence spawned when this one
     /// was completed. Used to remove the orphan if the completion is later undone.
     var nextOccurrenceID: UUID?
+
+    /// For month-based recurrences (monthly/quarterly/semiannually/yearly): the
+    /// day-of-month the schedule is anchored to. Lets "monthly on the 31st"
+    /// recover after being clamped to a shorter month (e.g. Feb 28) instead of
+    /// drifting to the 28th forever. Nil for older data and non-month schedules.
+    var recurrenceAnchorDay: Int?
 
     var category: Category?
 
@@ -263,6 +304,14 @@ final class Reminder {
     /// Complete a reminder, handling recurring logic automatically.
     /// For recurring reminders, creates the next occurrence before marking complete.
     func complete(in modelContext: ModelContext) {
+        // Habits track per-day completion history and reset at midnight; they must
+        // never be permanently completed (that would remove them from the habit
+        // list forever). Route generic completion UI to the habit mechanism.
+        if isHabit {
+            markHabitDoneToday()
+            return
+        }
+
         // Guard against re-completing an already-completed reminder, which would
         // spawn a second next occurrence (data duplication).
         guard !isCompleted else { return }
@@ -373,15 +422,53 @@ final class Reminder {
         return count
     }
 
+    /// The day-of-month a month-based schedule is anchored to. Normally the due
+    /// date's own day; the stored anchor is only trusted when the due date sits
+    /// clamped at the end of a short month (e.g. due Feb 28 for a "monthly on the
+    /// 31st" schedule), so a user editing the due date naturally resets the anchor.
+    private func monthAnchorDay(for date: Date, calendar: Calendar) -> Int {
+        let day = calendar.component(.day, from: date)
+        guard let stored = recurrenceAnchorDay, stored > day,
+              let range = calendar.range(of: .day, in: .month, for: date),
+              day == range.count else {
+            return day
+        }
+        return stored
+    }
+
     /// For recurring reminders, creates the next occurrence and resets this one
     /// Returns a new Reminder if this is recurring, nil otherwise
     func createNextOccurrence() -> Reminder? {
         guard isRecurring, let currentDueDate = dueDate else { return nil }
 
-        // Use the later of current due date or today to ensure next occurrence is in the future
-        // This prevents overdue recurring items from creating a next occurrence that's still due today
-        let baseDate = max(currentDueDate, Calendar.current.startOfDay(for: Date()))
-        guard let nextDueDate = recurrence.nextDate(from: baseDate) else { return nil }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        // Preserve the day-of-month anchor for month-based recurrences.
+        let anchorDay: Int?
+        switch recurrence {
+        case .monthly, .quarterly, .semiannually, .yearly:
+            anchorDay = monthAnchorDay(for: currentDueDate, calendar: calendar)
+        default:
+            anchorDay = nil
+        }
+
+        // Advance from the current due date — preserving the schedule's anchor
+        // (day-of-week / day-of-month) — until the next occurrence is after today.
+        // Completing an overdue item must neither re-base the whole schedule on the
+        // completion date nor produce an occurrence that's immediately due again.
+        guard var nextDueDate = recurrence.nextDate(from: currentDueDate, anchorDay: anchorDay) else { return nil }
+        var iterations = 0
+        while calendar.startOfDay(for: nextDueDate) <= today, iterations < 1000 {
+            guard let advanced = recurrence.nextDate(from: nextDueDate, anchorDay: anchorDay) else { break }
+            nextDueDate = advanced
+            iterations += 1
+        }
+        // Safety net for absurdly overdue items (beyond the iteration cap):
+        // fall back to advancing from today.
+        if calendar.startOfDay(for: nextDueDate) <= today {
+            nextDueDate = recurrence.nextDate(from: today, anchorDay: anchorDay) ?? nextDueDate
+        }
 
         let nextReminder = Reminder(
             title: title,
@@ -393,6 +480,7 @@ final class Reminder {
             recurrence: recurrence
         )
         nextReminder.aiEnhancedDescription = aiEnhancedDescription
+        nextReminder.recurrenceAnchorDay = anchorDay
 
         return nextReminder
     }
@@ -408,7 +496,7 @@ final class Reminder {
 
         let calendar = Calendar.current
         let weekday = calendar.component(.weekday, from: dueDate)
-        let dayOfMonth = calendar.component(.day, from: dueDate)
+        let dayOfMonth = monthAnchorDay(for: dueDate, calendar: calendar)
         let weekdayName = calendar.weekdaySymbols[weekday - 1]
 
         switch recurrence {

@@ -44,10 +44,10 @@ struct AllRemindersView: View {
         case .completed:
             return result.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
         case .recurring:
-            // Sort by recurrence type (daily first), then by due date
+            // Sort by recurrence frequency (daily first), then by due date
             return result.sorted { r1, r2 in
-                if r1.recurrence.rawValue != r2.recurrence.rawValue {
-                    return r1.recurrence.rawValue < r2.recurrence.rawValue
+                if r1.recurrence.sortOrder != r2.recurrence.sortOrder {
+                    return r1.recurrence.sortOrder < r2.recurrence.sortOrder
                 }
                 return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
             }
@@ -273,6 +273,18 @@ struct RecurringRemindersSection: View {
         let reminders: [Reminder]
     }
 
+    private static let groupColors: [RecurrenceType: Color] = [
+        .daily: .yellow,
+        .weekdays: .orange,
+        .weekends: .cyan,
+        .weekly: .blue,
+        .biweekly: .purple,
+        .monthly: .green,
+        .quarterly: .teal,
+        .semiannually: .indigo,
+        .yearly: .pink,
+    ]
+
     private var groupedByRecurrence: [RecurrenceGroupData] {
         // Single pass to group by recurrence type
         var grouped: [RecurrenceType: [Reminder]] = [:]
@@ -280,16 +292,21 @@ struct RecurringRemindersSection: View {
             grouped[reminder.recurrence, default: []].append(reminder)
         }
 
-        let groupDefs: [(type: RecurrenceType, title: String, icon: String, color: Color)] = [
-            (.daily, "Daily", "sun.max.fill", .yellow),
-            (.weekly, "Weekly", "calendar.circle", .blue),
-            (.biweekly, "Every 2 Weeks", "calendar.badge.clock", .purple),
-            (.monthly, "Monthly", "calendar", .green),
-        ]
+        // Cover every recurrence type (most frequent first) so no reminder is
+        // silently missing from the Recurring view.
+        let orderedTypes = RecurrenceType.allCases
+            .filter { $0 != .none }
+            .sorted { $0.sortOrder < $1.sortOrder }
 
-        return groupDefs.compactMap { def in
-            guard let items = grouped[def.type], !items.isEmpty else { return nil }
-            return RecurrenceGroupData(id: def.title, title: def.title, icon: def.icon, color: def.color, reminders: items)
+        return orderedTypes.compactMap { type in
+            guard let items = grouped[type], !items.isEmpty else { return nil }
+            return RecurrenceGroupData(
+                id: type.label,
+                title: type.label,
+                icon: type.icon,
+                color: Self.groupColors[type] ?? .gray,
+                reminders: items
+            )
         }
     }
 

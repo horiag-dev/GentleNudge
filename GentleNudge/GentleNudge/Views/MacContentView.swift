@@ -78,8 +78,8 @@ struct MacContentView: View {
         reminders.filter { $0.isRecurring && !$0.isCompleted }
             .sorted { r1, r2 in
                 // Sort by recurrence frequency (daily first) then by next due date
-                if r1.recurrence.rawValue != r2.recurrence.rawValue {
-                    return r1.recurrence.rawValue < r2.recurrence.rawValue
+                if r1.recurrence.sortOrder != r2.recurrence.sortOrder {
+                    return r1.recurrence.sortOrder < r2.recurrence.sortOrder
                 }
                 return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
             }
