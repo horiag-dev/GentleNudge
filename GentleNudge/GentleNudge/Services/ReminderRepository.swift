@@ -140,13 +140,13 @@ actor ReminderRepository {
         }
         // Anchor is ignored for non-month-based cadences (left nil).
 
-        let priority: ReminderPriority = (input.priority == "urgent") ? .urgent : .normal
-
+        // Chat never sets priority (the priority UI was removed): always create at
+        // the model's default `.normal`.
         let reminder = Reminder(
             title: input.title,
             notes: input.notes ?? "",
             dueDate: dueDate,
-            priority: priority,
+            priority: .normal,
             category: category,
             recurrence: recurrence
         )
@@ -177,8 +177,7 @@ actor ReminderRepository {
         let summary = Self.cardSummary(
             dueString: dueString,
             category: category.name,
-            recurrence: recurrenceDescription,
-            priority: priority
+            recurrence: recurrenceDescription
         )
         let snapshot = ReminderSnapshot(
             title: reminder.title,
@@ -328,14 +327,12 @@ actor ReminderRepository {
     static func cardSummary(
         dueString: String?,
         category: String,
-        recurrence: String?,
-        priority: ReminderPriority
+        recurrence: String?
     ) -> String {
         var parts: [String] = []
         if let recurrence { parts.append(recurrence) }
         else if let dueString { parts.append(dueString) }
         parts.append(category)
-        if priority == .urgent { parts.append("Urgent") }
         return parts.joined(separator: " · ")
     }
 }

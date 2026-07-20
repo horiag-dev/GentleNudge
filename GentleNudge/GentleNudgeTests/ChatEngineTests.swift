@@ -103,7 +103,6 @@ final class ChatToolParsingTests: XCTestCase {
             "notes": .null,
             "due_date": .string("2026-07-21"),
             "category_id": .string("11111111-1111-1111-1111-111111111111"),
-            "priority": .string("normal"),
             "recurrence": .string("none"),
             "recurrence_anchor_day": .null
         ])
@@ -122,12 +121,10 @@ final class ChatToolParsingTests: XCTestCase {
             "notes": .null,
             "due_date": .string("2026-08-01"),
             "category_id": .string("22222222-2222-2222-2222-222222222222"),
-            "priority": .string("urgent"),
             "recurrence": .string("monthly"),
             "recurrence_anchor_day": .int(1)
         ])
         let parsed = ChatCoordinator.parseCreateReminder(input)
-        XCTAssertEqual(parsed?.priority, "urgent")
         XCTAssertEqual(parsed?.recurrence, "monthly")
         XCTAssertEqual(parsed?.recurrenceAnchorDay, 1)
     }

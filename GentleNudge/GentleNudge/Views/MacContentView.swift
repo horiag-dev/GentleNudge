@@ -906,8 +906,32 @@ struct MacReminderDetailPanel: View {
                         if let dueDate = reminder.dueDate {
                             DatePicker("", selection: Binding(get: { dueDate }, set: { reminder.dueDate = $0 }), displayedComponents: [.date])
                                 .labelsHidden()
-                            Button("Remove", role: .destructive) { reminder.dueDate = nil }
-                                .font(.caption)
+
+                            // Recurrence — only meaningful for a dated reminder, mirroring
+                            // the iOS editor. Bind straight to `reminder.recurrence`; the
+                            // effective month anchor is always re-derived from the current
+                            // due date by `Reminder.monthAnchorDay`, so editing the date or
+                            // cadence never leaves a stale `recurrenceAnchorDay` that
+                            // contradicts the new value — we deliberately don't write it here.
+                            RecurrencePicker(recurrence: $reminder.recurrence)
+
+                            if let detailed = reminder.detailedRecurrence {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "info.circle")
+                                        .foregroundStyle(.purple)
+                                    Text(detailed)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            // Match the iOS "Clear date": dropping the due date also
+                            // clears recurrence (a recurring reminder needs a due date).
+                            Button("Remove", role: .destructive) {
+                                reminder.dueDate = nil
+                                reminder.recurrence = .none
+                            }
+                            .font(.caption)
                         } else {
                             HStack(spacing: 6) {
                                 Button("Today") {

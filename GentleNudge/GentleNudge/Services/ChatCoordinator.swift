@@ -290,7 +290,7 @@ final class ChatCoordinator {
         case "create_reminder":
             guard let parsed = Self.parseCreateReminder(input) else {
                 return ToolExecutionResult(
-                    content: "The create_reminder arguments were malformed. Provide title, notes, due_date, category_id, priority, recurrence, and recurrence_anchor_day.",
+                    content: "The create_reminder arguments were malformed. Provide title, notes, due_date, category_id, recurrence, and recurrence_anchor_day.",
                     isError: true,
                     card: nil
                 )
@@ -474,7 +474,6 @@ final class ChatCoordinator {
             notes: input["notes"]?.stringValue,
             dueDate: input["due_date"]?.stringValue,
             categoryID: categoryID,
-            priority: input["priority"]?.stringValue ?? "normal",
             recurrence: input["recurrence"]?.stringValue ?? "none",
             recurrenceAnchorDay: input["recurrence_anchor_day"]?.intValue
         )

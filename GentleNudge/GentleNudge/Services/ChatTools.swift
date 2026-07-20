@@ -7,7 +7,6 @@ struct CreateReminderInput: Sendable {
     let notes: String?
     let dueDate: String?
     let categoryID: String
-    let priority: String
     let recurrence: String
     let recurrenceAnchorDay: Int?
 }
@@ -58,7 +57,6 @@ enum ChatTools {
                     "category_id": stringProp(
                         "The UUID of an existing category, taken from the category list provided in the system context."
                     ),
-                    "priority": enumProp(["normal", "urgent"], "Reminder priority."),
                     "recurrence": enumProp(
                         recurrenceValues,
                         "Recurrence cadence. Use 'none' for a one-off reminder. Only these cadences are supported."
@@ -70,7 +68,7 @@ enum ChatTools {
                 ]),
                 "required": .array([
                     "title", "notes", "due_date", "category_id",
-                    "priority", "recurrence", "recurrence_anchor_day"
+                    "recurrence", "recurrence_anchor_day"
                 ].map(JSONValue.string))
             ])
         )
