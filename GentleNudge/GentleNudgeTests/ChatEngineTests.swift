@@ -145,6 +145,23 @@ final class ChatToolParsingTests: XCTestCase {
         XCTAssertTrue(RecurrenceType.monthly.isMonthBased)
         XCTAssertFalse(RecurrenceType.weekly.isMonthBased)
     }
+
+    // MARK: batch id-list parsing (delete_reminders / complete_reminders)
+
+    func test_parseIDList_extractsStrings() {
+        let input = JSONValue.object(["ids": .array([.string("id-1"), .string("id-2")])])
+        XCTAssertEqual(ChatCoordinator.parseIDList(input), ["id-1", "id-2"])
+    }
+
+    func test_parseIDList_missingOrWrongType_returnsNil() {
+        XCTAssertNil(ChatCoordinator.parseIDList(.object([:])))
+        XCTAssertNil(ChatCoordinator.parseIDList(.object(["ids": .string("not-array")])))
+    }
+
+    func test_parseIDList_dropsEmptyAndNonStringEntries() {
+        let input = JSONValue.object(["ids": .array([.string("keep"), .string(""), .null, .int(3)])])
+        XCTAssertEqual(ChatCoordinator.parseIDList(input), ["keep"])
+    }
 }
 
 // MARK: - Phase 3 executor tests (find / update / complete)
@@ -409,5 +426,103 @@ final class ChatEngineExecutorTests: XCTestCase {
         XCTAssertFalse(result.isError)
         XCTAssertTrue(result.didDelete)
         XCTAssertTrue(freshReminders(container).isEmpty)
+    }
+
+    // MARK: delete_reminders / complete_reminders (batch cleanup)
+
+    func test_deleteReminders_removesAllAndReportsSkipped() async throws {
+        let container = try makeContainer()
+        let catID = seedCategory(container, name: "House")
+        let a = seedReminder(container, title: "Old A", due: nil, categoryID: catID)
+        let b = seedReminder(container, title: "Old B", due: nil, categoryID: catID)
+        seedReminder(container, title: "Keep me", due: date("2026-08-01"), categoryID: catID)
+
+        let repo = ReminderRepository(modelContainer: container)
+        // Two real ids + a random-but-unused UUID + a non-UUID string: both skipped.
+        let result = await repo.deleteReminders(
+            ids: [a.uuidString, b.uuidString, UUID().uuidString, "not-a-uuid"]
+        )
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(result.deletedCount, 2)
+        XCTAssertEqual(result.skippedCount, 2)
+
+        let remaining = freshReminders(container)
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?.title, "Keep me")
+    }
+
+    func test_deleteReminders_emptyIsError() async throws {
+        let container = try makeContainer()
+        let repo = ReminderRepository(modelContainer: container)
+        let result = await repo.deleteReminders(ids: [])
+        XCTAssertTrue(result.isError)
+        XCTAssertEqual(result.deletedCount, 0)
+    }
+
+    func test_reminderTitles_returnsResolvableOnlyInOrder() async throws {
+        let container = try makeContainer()
+        let catID = seedCategory(container, name: "House")
+        let a = seedReminder(container, title: "Alpha", due: nil, categoryID: catID)
+        let repo = ReminderRepository(modelContainer: container)
+        // The gate builds its sample from this: only resolvable ids appear.
+        let titles = await repo.reminderTitles(ids: [a.uuidString, "bogus", UUID().uuidString])
+        XCTAssertEqual(titles, ["Alpha"])
+    }
+
+    func test_completeReminders_routesThroughComplete_spawnsSuccessorAndSkipsMissing() async throws {
+        let container = try makeContainer()
+        let catID = seedCategory(container, name: "House")
+        let recurring = seedReminder(container, title: "Water plants", due: date("2026-07-20"), categoryID: catID, recurrence: .weekly)
+        let plain = seedReminder(container, title: "Return book", due: date("2026-07-19"), categoryID: catID)
+
+        let repo = ReminderRepository(modelContainer: container)
+        let result = await repo.completeReminders(
+            ids: [recurring.uuidString, plain.uuidString, UUID().uuidString],
+            timeZone: tz
+        )
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(result.completedCount, 2)
+        XCTAssertEqual(result.skippedCount, 1) // the unused UUID doesn't resolve
+
+        let all = freshReminders(container)
+        // complete(in:) spawns a successor for the recurring item — markCompleted() would not.
+        // Original recurring (completed) + spawned successor + completed plain = 3.
+        XCTAssertEqual(all.count, 3)
+        let orig = all.first { $0.id == recurring }
+        XCTAssertEqual(orig?.isCompleted, true)
+        XCTAssertNotNil(orig?.nextOccurrenceID)
+        let successor = all.first { $0.id != recurring && $0.id != plain }
+        XCTAssertEqual(successor?.isCompleted, false)
+        XCTAssertEqual(successor?.title, "Water plants")
+    }
+
+    func test_completeReminders_habitMarksDoneTodayNotCompleted() async throws {
+        let container = try makeContainer()
+        let habitID = seedCategory(container, name: "Habits", habit: true)
+        let id = seedReminder(container, title: "Meditate", due: nil, categoryID: habitID)
+
+        let repo = ReminderRepository(modelContainer: container)
+        let result = await repo.completeReminders(ids: [id.uuidString], timeZone: tz)
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(result.completedCount, 1)
+
+        let r = freshReminder(container, id: id)
+        // Habit routes through complete(in:) → markHabitDoneToday(): per-day history, not permanent completion.
+        XCTAssertEqual(r?.isCompleted, false)
+        XCTAssertEqual(r?.habitCompletionDates.isEmpty, false)
+    }
+
+    func test_completeReminders_skipsAlreadyCompletedNonHabit() async throws {
+        let container = try makeContainer()
+        let catID = seedCategory(container, name: "House")
+        let done = seedReminder(container, title: "Done already", due: date("2026-07-10"), categoryID: catID)
+        markCompleted(container, id: done)
+
+        let repo = ReminderRepository(modelContainer: container)
+        let result = await repo.completeReminders(ids: [done.uuidString], timeZone: tz)
+        XCTAssertFalse(result.isError)
+        // Already-completed non-habits are skipped (no double-spawn).
+        XCTAssertEqual(result.completedCount, 0)
+        XCTAssertEqual(result.skippedCount, 1)
     }
 }

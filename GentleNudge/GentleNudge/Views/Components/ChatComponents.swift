@@ -18,6 +18,9 @@ final class ConfirmationPresenter {
         let message: String
         let confirmLabel: String
         let isDestructive: Bool
+        /// Sample of item titles for a batch gate (e.g. bulk delete). Empty for
+        /// single-item gates. Rendered as a short bulleted preview + "+N more".
+        var sampleTitles: [String] = []
     }
 
     private(set) var pending: Pending?
@@ -26,12 +29,21 @@ final class ConfirmationPresenter {
     /// Suspends until the user resolves the gate. Safe to `await` from a
     /// coordinator `@Sendable` hook — hops to the main actor here. Only one gate is
     /// ever pending at a time (turns are single-in-flight; tool_uses run serially).
-    func request(title: String, message: String, confirmLabel: String, isDestructive: Bool) async -> Bool {
+    func request(
+        title: String,
+        message: String,
+        confirmLabel: String,
+        isDestructive: Bool,
+        sampleTitles: [String] = []
+    ) async -> Bool {
         // Defensively resolve any orphaned prior request.
         continuation?.resume(returning: false)
         continuation = nil
         return await withCheckedContinuation { cont in
-            self.pending = Pending(title: title, message: message, confirmLabel: confirmLabel, isDestructive: isDestructive)
+            self.pending = Pending(
+                title: title, message: message, confirmLabel: confirmLabel,
+                isDestructive: isDestructive, sampleTitles: sampleTitles
+            )
             self.continuation = cont
         }
     }
@@ -351,6 +363,9 @@ struct ConfirmationCard: View {
     private var tint: Color { pending.isDestructive ? .red : .accentColor }
     private var icon: String { pending.isDestructive ? "trash" : "folder.badge.plus" }
 
+    /// At most this many sample titles are listed; the rest collapse to "+N more".
+    private let sampleLimit = 4
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label(pending.title, systemImage: icon)
@@ -358,6 +373,9 @@ struct ConfirmationCard: View {
             Text(pending.message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if !pending.sampleTitles.isEmpty {
+                sampleList
+            }
             HStack(spacing: 12) {
                 Button(pending.confirmLabel, role: pending.isDestructive ? .destructive : nil) { onConfirm() }
                     .buttonStyle(.borderedProminent)
@@ -374,6 +392,29 @@ struct ConfirmationCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(tint.opacity(0.4), lineWidth: 1)
         )
+    }
+
+    /// A short preview of the affected titles for a batch gate, capped at
+    /// `sampleLimit` with a "+N more" overflow line.
+    private var sampleList: some View {
+        let shown = pending.sampleTitles.prefix(sampleLimit)
+        let overflow = pending.sampleTitles.count - shown.count
+        return VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, title in
+                HStack(alignment: .top, spacing: 6) {
+                    Text("•").foregroundStyle(.secondary)
+                    Text(title)
+                        .lineLimit(1)
+                        .foregroundStyle(.primary)
+                }
+            }
+            if overflow > 0 {
+                Text("+\(overflow) more")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -636,6 +677,39 @@ struct DeletedCard: View {
     }
 }
 
+// MARK: - batch cleanup result card (muted)
+
+/// The muted result of a confirmed batch: "Cleaned up N items" for a bulk delete,
+/// "Completed N items" for a bulk complete. Mirrors `DeletedCard`'s quiet styling.
+struct CleanupCard: View {
+    let count: Int
+    let isCompletion: Bool
+
+    private var icon: String { isCompletion ? "checkmark.circle.fill" : "trash" }
+    private var noun: String { count == 1 ? "item" : "items" }
+    private var text: String {
+        isCompletion ? "Completed \(count) \(noun)" : "Cleaned up \(count) \(noun)"
+    }
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundStyle(isCompletion ? Color.green.opacity(0.7) : Color.secondary)
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: 420, alignment: .leading)
+            .padding(12)
+            .background(AppColors.secondaryBackground.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Spacer(minLength: 40)
+        }
+    }
+}
+
 // MARK: - Error banner
 
 struct ChatErrorBanner: View {
@@ -676,7 +750,13 @@ struct ChatErrorBanner: View {
 
 struct ChatEmptyState: View {
     let examples: [String]
+    /// When there's meaningful cleanup potential, the number of clearable items;
+    /// nil hides the proactive "Clean up" suggestion.
+    var cleanupCount: Int?
     let onPick: (String) -> Void
+
+    /// The phrase pre-filled (not sent) when the cleanup suggestion is tapped.
+    private let cleanupPrompt = "Clean up my list"
 
     var body: some View {
         VStack(spacing: 16) {
@@ -693,6 +773,29 @@ struct ChatEmptyState: View {
             }
 
             VStack(spacing: 8) {
+                if let cleanupCount, cleanupCount > 0 {
+                    Button {
+                        onPick(cleanupPrompt)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("🧹")
+                            Text("Clean up \(cleanupCount) \(cleanupCount == 1 ? "item" : "items")")
+                                .font(.subheadline.weight(.medium))
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.accentColor.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 ForEach(examples, id: \.self) { example in
                     Button {
                         onPick(example)

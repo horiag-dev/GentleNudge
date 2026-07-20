@@ -10,6 +10,7 @@ struct ChatView: View {
     @Environment(ChatCoordinator.self) private var coordinator
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \Category.sortOrder) private var categories: [Category]
+    @Query private var allReminders: [Reminder]
 
     /// Settings deep link: iOS switches to the Settings tab; macOS opens the
     /// settings sheet. Nil in previews.
@@ -35,6 +36,23 @@ struct ChatView: View {
     }
 
     private var hasCategories: Bool { !availableCategories.isEmpty }
+
+    /// Proactive cleanup potential for the empty-state offer. Counts completed
+    /// reminders (safe to clear) plus non-habit reminders overdue by more than 14
+    /// days (stale). The offer shows when there are ≥ 5 completed OR any very-stale
+    /// reminder; `count` is the total of both kinds. Nil hides the offer.
+    private var cleanupCount: Int? {
+        var completed = 0
+        var stale = 0
+        for r in allReminders {
+            if r.isCompleted { completed += 1; continue }
+            if r.isHabit { continue }
+            if let days = r.daysUntilDue, days < -14 { stale += 1 }
+        }
+        let count = completed + stale
+        let meaningful = completed >= 5 || stale > 0
+        return (meaningful && count > 0) ? count : nil
+    }
 
     private var canSend: Bool {
         hasAPIKey
@@ -96,7 +114,7 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if coordinator.transcript.isEmpty && !coordinator.isRunning {
-                        ChatEmptyState(examples: examplePrompts) { prompt in
+                        ChatEmptyState(examples: examplePrompts, cleanupCount: cleanupCount) { prompt in
                             draft = prompt
                             inputFocused = true
                         }
@@ -159,6 +177,8 @@ struct ChatView: View {
             CompletionCard(title: title, isCompleted: isCompleted, detail: detail, isUndo: isUndo)
         case .deletedCard(_, let title):
             DeletedCard(title: title)
+        case .cleanupCard(_, let count, let isCompletion):
+            CleanupCard(count: count, isCompletion: isCompletion)
         }
     }
 
@@ -289,6 +309,26 @@ struct ChatView: View {
                 message: "The assistant wants to permanently delete “\(title)”. This can't be undone.",
                 confirmLabel: "Delete",
                 isDestructive: true
+            )
+        }
+        coordinator.bulkDeletionApprovalHook = { count, sampleTitles in
+            let noun = count == 1 ? "reminder" : "reminders"
+            return await presenter.request(
+                title: "Clean up \(count) \(noun)?",
+                message: "The assistant wants to permanently delete \(count) \(noun). This can't be undone.",
+                confirmLabel: "Delete \(count)",
+                isDestructive: true,
+                sampleTitles: sampleTitles
+            )
+        }
+        coordinator.bulkCompletionApprovalHook = { count, sampleTitles in
+            let noun = count == 1 ? "reminder" : "reminders"
+            return await presenter.request(
+                title: "Complete \(count) \(noun)?",
+                message: "The assistant wants to mark \(count) \(noun) done.",
+                confirmLabel: "Complete \(count)",
+                isDestructive: false,
+                sampleTitles: sampleTitles
             )
         }
     }

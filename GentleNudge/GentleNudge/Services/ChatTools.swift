@@ -46,6 +46,12 @@ struct ReminderIDInput: Sendable {
     let id: String
 }
 
+/// A batch of reminder ids, for the bulk cleanup tools (delete_reminders /
+/// complete_reminders). Ids that no longer resolve are skipped in the executor.
+struct IDListInput: Sendable {
+    let ids: [String]
+}
+
 // MARK: - Tool schema definitions (strict mode)
 
 /// Strict-mode tool schemas for the chat assistant. Every tool sets
@@ -66,7 +72,8 @@ enum ChatTools {
         [
             createReminder, createCategory,
             findReminders, updateReminder,
-            completeReminder, uncompleteReminder, deleteReminder
+            completeReminder, uncompleteReminder, deleteReminder,
+            completeReminders, deleteReminders
         ]
     }
 
@@ -270,7 +277,59 @@ enum ChatTools {
         )
     }
 
+    static var completeReminders: ToolDefinition {
+        ToolDefinition(
+            name: "complete_reminders",
+            description: """
+            Mark SEVERAL reminders complete in one call (each id from \
+            find_reminders). Use this to finish a batch at once — e.g. "mark all of \
+            these done" — instead of one complete_reminder per item. Recurring items \
+            spawn their next occurrence; habits are marked done for today. Ids that \
+            no longer resolve are skipped and reported. A large batch asks the user \
+            to confirm once before it runs.
+            """,
+            strict: true,
+            input_schema: idListSchema("The UUIDs of the reminders to mark complete, each from find_reminders.")
+        )
+    }
+
+    static var deleteReminders: ToolDefinition {
+        ToolDefinition(
+            name: "delete_reminders",
+            description: """
+            Permanently delete SEVERAL reminders in one call (each id from \
+            find_reminders). This is the "clean up / clear out / declutter" batch \
+            path — prefer it over deleting one at a time. It asks the user to \
+            confirm ONCE for the whole batch (showing the count and a sample of \
+            titles) before anything is deleted. Ids that no longer resolve are \
+            skipped and reported. Only include reminders the user clearly wants \
+            gone (completed, long-stale, or duplicates), never active or near-future \
+            ones unless they explicitly asked.
+            """,
+            strict: true,
+            input_schema: idListSchema("The UUIDs of the reminders to delete, each from find_reminders.")
+        )
+    }
+
     // MARK: Schema helpers
+
+    /// Strict schema for a tool taking a single `ids` array-of-strings. No
+    /// min/max item counts (strict mode rejects them); an empty array is handled
+    /// in the executor.
+    private static func idListSchema(_ description: String) -> JSONValue {
+        .object([
+            "type": .string("object"),
+            "additionalProperties": .bool(false),
+            "properties": .object([
+                "ids": .object([
+                    "type": .string("array"),
+                    "description": .string(description),
+                    "items": .object(["type": .string("string")])
+                ])
+            ]),
+            "required": .array([.string("ids")])
+        ])
+    }
 
     private static func idOnlySchema(_ description: String) -> JSONValue {
         .object([

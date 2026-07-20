@@ -127,6 +127,27 @@ struct DeleteResult: Sendable {
     let didDelete: Bool
 }
 
+/// Result of the confirmed batch `delete_reminders`. `sampleTitles` holds the
+/// titles actually removed (for the "Cleaned up N" card / logging); `skippedCount`
+/// covers ids that didn't resolve or failed to save.
+struct BatchDeleteResult: Sendable {
+    let content: String
+    let isError: Bool
+    let deletedCount: Int
+    let skippedCount: Int
+    let sampleTitles: [String]
+}
+
+/// Result of the batch `complete_reminders`. Symmetric to `BatchDeleteResult`;
+/// `completedCount` counts reminders actually routed through `complete(in:)`.
+struct BatchCompletionResult: Sendable {
+    let content: String
+    let isError: Bool
+    let completedCount: Int
+    let skippedCount: Int
+    let sampleTitles: [String]
+}
+
 extension FindRemindersResult {
     static func findFailure(_ message: String, query: String?) -> FindRemindersResult {
         FindRemindersResult(content: message, isError: true, query: query, rows: [], totalMatches: 0)
@@ -626,6 +647,99 @@ actor ReminderRepository {
         return DeleteResult(content: content, isError: false, title: title, didDelete: true)
     }
 
+    // MARK: Batch cleanup (delete_reminders / complete_reminders)
+
+    /// Current titles for a batch of ids, in the given order, for the bulk
+    /// confirmation card's sample. Unresolvable ids are omitted (so an empty
+    /// result means "nothing left to act on").
+    func reminderTitles(ids: [String]) -> [String] {
+        ids.compactMap { raw in
+            guard let uuid = UUID(uuidString: raw) else { return nil }
+            return fetchReminder(id: uuid)?.title
+        }
+    }
+
+    /// Confirmed batch delete for `delete_reminders`, run only after the user
+    /// approves the single gate. Deletes each resolvable reminder (unwinding a
+    /// recurring successor, exactly as the single delete does); ids that don't
+    /// resolve or fail to save are skipped and counted rather than failing the
+    /// whole batch.
+    func deleteReminders(ids: [String]) -> BatchDeleteResult {
+        guard !ids.isEmpty else {
+            return BatchDeleteResult(
+                content: "No reminder ids were provided to delete.",
+                isError: true, deletedCount: 0, skippedCount: 0, sampleTitles: []
+            )
+        }
+        var deletedTitles: [String] = []
+        var skipped = 0
+        for raw in ids {
+            guard let uuid = UUID(uuidString: raw) else { skipped += 1; continue }
+            let outcome = removeReminder(id: uuid)
+            if outcome.didDelete {
+                deletedTitles.append(outcome.title ?? "Reminder")
+            } else {
+                skipped += 1
+            }
+        }
+        let payload = BatchDeleteSuccess(
+            deleted_count: deletedTitles.count,
+            skipped_count: skipped,
+            deleted_titles: Array(deletedTitles.prefix(10))
+        )
+        let content = Self.encodeJSON(payload) ?? "{\"deleted_count\":\(deletedTitles.count)}"
+        return BatchDeleteResult(
+            content: content, isError: false,
+            deletedCount: deletedTitles.count, skippedCount: skipped, sampleTitles: deletedTitles
+        )
+    }
+
+    /// Batch complete for `complete_reminders`: routes each resolvable reminder
+    /// through `complete(in:)` (so recurring items spawn a successor and habits
+    /// mark done today), then saves once. Non-habit reminders that are already
+    /// completed are skipped (no double-spawn); unresolvable ids are skipped too.
+    func completeReminders(ids: [String], timeZone: TimeZone) -> BatchCompletionResult {
+        guard !ids.isEmpty else {
+            return BatchCompletionResult(
+                content: "No reminder ids were provided to complete.",
+                isError: true, completedCount: 0, skippedCount: 0, sampleTitles: []
+            )
+        }
+        var completedTitles: [String] = []
+        var skipped = 0
+        for raw in ids {
+            guard let uuid = UUID(uuidString: raw), let reminder = fetchReminder(id: uuid) else {
+                skipped += 1
+                continue
+            }
+            if !reminder.isHabit, reminder.isCompleted {
+                skipped += 1
+                continue
+            }
+            reminder.complete(in: modelContext)
+            completedTitles.append(reminder.title)
+        }
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            return BatchCompletionResult(
+                content: "Couldn't save the completions: \(error.localizedDescription)",
+                isError: true, completedCount: 0, skippedCount: ids.count, sampleTitles: []
+            )
+        }
+        let payload = BatchCompletionSuccess(
+            completed_count: completedTitles.count,
+            skipped_count: skipped,
+            completed_titles: Array(completedTitles.prefix(10))
+        )
+        let content = Self.encodeJSON(payload) ?? "{\"completed_count\":\(completedTitles.count)}"
+        return BatchCompletionResult(
+            content: content, isError: false,
+            completedCount: completedTitles.count, skippedCount: skipped, sampleTitles: completedTitles
+        )
+    }
+
     private func removeReminder(id: UUID) -> (didDelete: Bool, title: String?) {
         guard let reminder = fetchReminder(id: id) else { return (false, nil) }
         let title = reminder.title
@@ -856,4 +970,16 @@ private struct DeleteSuccess: Encodable {
     let id: String
     let title: String
     let deleted: Bool
+}
+
+private struct BatchDeleteSuccess: Encodable {
+    let deleted_count: Int
+    let skipped_count: Int
+    let deleted_titles: [String]
+}
+
+private struct BatchCompletionSuccess: Encodable {
+    let completed_count: Int
+    let skipped_count: Int
+    let completed_titles: [String]
 }

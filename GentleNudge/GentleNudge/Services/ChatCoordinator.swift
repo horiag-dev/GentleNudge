@@ -20,6 +20,9 @@ enum TranscriptItem: Identifiable, Sendable {
     case completionCard(id: UUID, reminderID: UUID, title: String, isCompleted: Bool, detail: String?, isUndo: Bool)
     /// `delete_reminder` muted "Deleted" result (shown after the confirmation gate).
     case deletedCard(id: UUID, title: String)
+    /// Batch cleanup result ("Cleaned up N items" / "Completed N items"), shown
+    /// after a confirmed `delete_reminders` or a `complete_reminders` batch.
+    case cleanupCard(id: UUID, count: Int, isCompletion: Bool)
 
     var id: UUID {
         switch self {
@@ -36,6 +39,8 @@ enum TranscriptItem: Identifiable, Sendable {
         case .completionCard(let id, _, _, _, _, _):
             return id
         case .deletedCard(let id, _):
+            return id
+        case .cleanupCard(let id, _, _):
             return id
         }
     }
@@ -101,6 +106,20 @@ final class ChatCoordinator {
     /// until `ChatView` wires the shared Approve/Cancel card. Returns true to
     /// approve deletion. Reuses the same presenter seam as the category gate.
     var deletionApprovalHook: @Sendable (_ title: String) async -> Bool = { _ in false }
+
+    /// Confirmation gate for the destructive batch `delete_reminders`. Shown ONCE
+    /// for the whole batch, carrying the count and a sample of titles so the user
+    /// sees what's being cleared. Defaults to deny until `ChatView` wires the
+    /// shared presenter.
+    var bulkDeletionApprovalHook: @Sendable (_ count: Int, _ sampleTitles: [String]) async -> Bool = { _, _ in false }
+
+    /// Confirmation gate for a *large* batch `complete_reminders`. Completing is
+    /// non-destructive, so only batches at/above `bulkCompletionConfirmThreshold`
+    /// are gated (smaller ones run straight through). Defaults to deny until wired.
+    var bulkCompletionApprovalHook: @Sendable (_ count: Int, _ sampleTitles: [String]) async -> Bool = { _, _ in false }
+
+    /// A batch completion at or above this size shows a brief confirmation first.
+    static let bulkCompletionConfirmThreshold = 5
 
     // Wire history: the API `messages` array (full content blocks, tool_use /
     // tool_result pairs intact). Separate from `transcript`.
@@ -431,6 +450,10 @@ final class ChatCoordinator {
             return "Updating reminder"
         case "delete_reminder":
             return "Deleting reminder"
+        case "delete_reminders":
+            return "Cleaning up"
+        case "complete_reminders":
+            return "Completing reminders"
         default:
             return "Working"
         }
@@ -560,6 +583,51 @@ final class ChatCoordinator {
             let card: TranscriptItem? = (result.isError || !result.didDelete)
                 ? nil
                 : .deletedCard(id: UUID(), title: result.title ?? title)
+            return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
+
+        case "delete_reminders":
+            guard let ids = Self.parseIDList(input) else {
+                return ToolExecutionResult(content: "The delete_reminders arguments were malformed. Provide ids: an array of reminder id strings from find_reminders.", isError: true, card: nil)
+            }
+            guard !ids.isEmpty else {
+                return ToolExecutionResult(content: "No reminder ids were provided. Run find_reminders to gather the ids to delete.", isError: true, card: nil)
+            }
+            // Resolve current titles first, for the single confirmation card's
+            // count + sample. If none resolve, there's nothing to delete.
+            let titles = await repository.reminderTitles(ids: ids)
+            guard !titles.isEmpty else {
+                return ToolExecutionResult(content: "None of those reminders exist anymore. Run find_reminders again.", isError: true, card: nil)
+            }
+            // ONE confirmation for the whole batch.
+            let approved = await bulkDeletionApprovalHook(titles.count, titles)
+            guard approved else {
+                return ToolExecutionResult(content: "User declined to delete those \(titles.count) reminders. They were kept.", isError: false, card: nil)
+            }
+            let result = await repository.deleteReminders(ids: ids)
+            let card: TranscriptItem? = (result.isError || result.deletedCount == 0)
+                ? nil
+                : .cleanupCard(id: UUID(), count: result.deletedCount, isCompletion: false)
+            return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
+
+        case "complete_reminders":
+            guard let ids = Self.parseIDList(input) else {
+                return ToolExecutionResult(content: "The complete_reminders arguments were malformed. Provide ids: an array of reminder id strings from find_reminders.", isError: true, card: nil)
+            }
+            guard !ids.isEmpty else {
+                return ToolExecutionResult(content: "No reminder ids were provided. Run find_reminders to gather the ids to complete.", isError: true, card: nil)
+            }
+            // Completing is non-destructive: only a large batch is gated.
+            if ids.count >= Self.bulkCompletionConfirmThreshold {
+                let titles = await repository.reminderTitles(ids: ids)
+                let approved = await bulkCompletionApprovalHook(max(titles.count, 1), titles)
+                guard approved else {
+                    return ToolExecutionResult(content: "User declined to complete those \(ids.count) reminders.", isError: false, card: nil)
+                }
+            }
+            let result = await repository.completeReminders(ids: ids, timeZone: context.timeZone)
+            let card: TranscriptItem? = (result.isError || result.completedCount == 0)
+                ? nil
+                : .cleanupCard(id: UUID(), count: result.completedCount, isCompletion: true)
             return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
 
         default:
@@ -727,6 +795,14 @@ final class ChatCoordinator {
         return id
     }
 
+    /// Extracts the `ids` array for the batch tools. Returns nil when `ids` is
+    /// missing or not an array (malformed); an empty/whitespace-only list yields an
+    /// empty array, which the dispatch reports as "no ids provided".
+    nonisolated static func parseIDList(_ input: JSONValue) -> [String]? {
+        guard case let .array(items)? = input["ids"] else { return nil }
+        return items.compactMap { $0.stringValue }.filter { !$0.isEmpty }
+    }
+
     nonisolated private static func nonEmpty(_ value: String?) -> String? {
         guard let value, !value.isEmpty else { return nil }
         return value
@@ -747,6 +823,9 @@ final class ChatCoordinator {
     - update_reminder: change fields of one existing reminder.
     - complete_reminder / uncomplete_reminder: mark a reminder done / not done.
     - delete_reminder: permanently remove a reminder (asks the user to confirm).
+    - complete_reminders: mark MANY reminders done at once (ids from find_reminders).
+    - delete_reminders: permanently remove MANY reminders in one confirmed batch \
+      (ids from find_reminders). The cleanup path; asks the user to confirm once.
 
     Behavior policy:
     - Optimistic auto-insert for creations: call create_reminder immediately once \
@@ -768,6 +847,20 @@ final class ChatCoordinator {
     - complete_reminder marks done (recurring items spawn their next occurrence; \
       habits are marked done for today). Use uncomplete_reminder to undo. Only use \
       delete_reminder when the user wants the reminder gone, not merely finished.
+    - Cleaning up the list: when the user asks to clean up / tidy / clear out / \
+      declutter, first call find_reminders to gather candidates — completed \
+      reminders (status "completed", safe to clear), reminders overdue by more than \
+      ~14 days (likely stale), and obvious duplicates (same or near-same title) you \
+      can see in the results. Then summarize what you found grouped by kind \
+      ("8 completed, 3 long-overdue, 2 duplicates") and clear them with ONE \
+      delete_reminders batch — or complete_reminders where finishing is the better \
+      move. The confirmation card is shown before anything is removed; never delete \
+      without the user seeing the list. Be conservative: do NOT propose deleting \
+      active, near-future, or recurring reminders unless the user explicitly asks, \
+      and prefer completing over deleting when unsure.
+    - Use delete_reminders / complete_reminders (not repeated single calls) whenever \
+      you are acting on several reminders at once, so the user gets one confirmation \
+      instead of many.
     - Clarify vs. assume: if content is genuinely ambiguous, ask one short \
       question. Otherwise proceed. If no date is given, create it undated \
       (due_date: null) — do not nag for a date.
