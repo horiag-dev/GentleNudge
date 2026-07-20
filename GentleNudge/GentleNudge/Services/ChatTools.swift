@@ -54,12 +54,17 @@ struct IDListInput: Sendable {
 
 // MARK: - Tool schema definitions (strict mode)
 
-/// Strict-mode tool schemas for the chat assistant. Every tool sets
-/// `strict: true`, `additionalProperties: false`, lists *all* properties in
-/// `required`, and expresses optionality with nullable-type unions
-/// (`{"type": ["string","null"]}`). No `minimum`/`maximum`/`minLength`/`maxLength`
-/// — strict mode rejects those; ranges (e.g. the 1–31 anchor) are enforced in the
-/// executor. Recurrence crosses the wire as enum *strings*, never raw ints.
+/// Tool schemas for the chat assistant. Each tool sets `additionalProperties:
+/// false`, lists *all* properties in `required`, and expresses optionality with
+/// nullable-type unions (`{"type": ["string","null"]}`). Ranges (e.g. the 1–31
+/// anchor) and all other constraints are enforced in the executors, which also
+/// return `is_error` tool_results for self-healing. Recurrence crosses the wire
+/// as enum *strings*, never raw ints.
+///
+/// `strict` is intentionally OFF (nil). Enabling strict on all nine tools makes
+/// the API compile their combined schemas and it exceeds the compilation budget
+/// ("Schema is too complex for compilation" → HTTP 400). The model produces
+/// correct structured output without strict, and the executors validate anyway.
 enum ChatTools {
     static let recurrenceValues = [
         "none", "daily", "weekdays", "weekends", "weekly",
@@ -85,7 +90,7 @@ enum ChatTools {
             mentions. Resolve any relative date to a concrete YYYY-MM-DD first. \
             For recurring reminders, due_date is the first occurrence.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: .object([
                 "type": .string("object"),
                 "additionalProperties": .bool(false),
@@ -124,7 +129,7 @@ enum ChatTools {
             before anything is created. Only call this when no existing category \
             reasonably fits.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: .object([
                 "type": .string("object"),
                 "additionalProperties": .bool(false),
@@ -150,7 +155,7 @@ enum ChatTools {
             completing, or deleting a reminder — it returns the exact id each of \
             those tools needs. Returns up to 20 matching rows plus total_matches.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: .object([
                 "type": .string("object"),
                 "additionalProperties": .bool(false),
@@ -198,7 +203,7 @@ enum ChatTools {
             (this also clears recurrence). Do not set both due_date and \
             clear_due_date.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: .object([
                 "type": .string("object"),
                 "additionalProperties": .bool(false),
@@ -246,7 +251,7 @@ enum ChatTools {
             reminders automatically spawn their next occurrence; habits are marked \
             done for today.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: idOnlySchema("The UUID of the reminder to complete.")
         )
     }
@@ -259,7 +264,7 @@ enum ChatTools {
             find_reminders). Undoes a completion, removing any spawned recurring \
             occurrence.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: idOnlySchema("The UUID of the reminder to mark not done.")
         )
     }
@@ -272,7 +277,7 @@ enum ChatTools {
             the user to confirm before anything is deleted. Only call it when the \
             user clearly wants a reminder removed, not merely completed.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: idOnlySchema("The UUID of the reminder to delete.")
         )
     }
@@ -288,7 +293,7 @@ enum ChatTools {
             no longer resolve are skipped and reported. A large batch asks the user \
             to confirm once before it runs.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: idListSchema("The UUIDs of the reminders to mark complete, each from find_reminders.")
         )
     }
@@ -306,7 +311,7 @@ enum ChatTools {
             gone (completed, long-stale, or duplicates), never active or near-future \
             ones unless they explicitly asked.
             """,
-            strict: true,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: idListSchema("The UUIDs of the reminders to delete, each from find_reminders.")
         )
     }

@@ -149,7 +149,13 @@ struct ToolChoice: Encodable, Sendable {
 struct ToolDefinition: Encodable, Sendable {
     let name: String
     let description: String
-    let strict: Bool
+    /// Optional so it can be omitted. Strict mode is intentionally OFF for this
+    /// tool set: enabling `strict` on all tools makes the API compile their
+    /// combined schemas and it exceeds the compilation budget ("Schema is too
+    /// complex for compilation" → HTTP 400). The executors validate every input
+    /// and return `is_error` tool_results for self-healing, so strict is not
+    /// needed. Pass `nil` to omit (see ChatTools).
+    let strict: Bool?
     let input_schema: JSONValue
 }
 
