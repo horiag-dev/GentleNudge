@@ -3,11 +3,26 @@ import SwiftData
 
 struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
     @State private var searchText = ""
+    @State private var briefingVM = MorningBriefingViewModel()
     @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
+
+    /// Lightweight, Sendable snapshots for the once-a-day briefing.
+    private var reminderSummaries: [MorningBriefingService.ReminderSummary] {
+        reminders.map {
+            MorningBriefingService.ReminderSummary(
+                title: $0.title,
+                categoryName: $0.category?.name,
+                dueDate: $0.dueDate,
+                isHabit: $0.isHabit,
+                isCompleted: $0.isCompleted
+            )
+        }
+    }
 
     // MARK: - Categorized Reminders (computed from @Query for full reactivity)
 
@@ -117,6 +132,13 @@ struct TodayView: View {
 
             ScrollView {
                 LazyVStack(spacing: Constants.Spacing.sm) {
+                    // AI morning briefing (once per day, dismissible)
+                    if searchText.isEmpty {
+                        MorningBriefingCard(state: briefingVM.state) {
+                            withAnimation(Constants.Animation.standard) { briefingVM.dismiss() }
+                        }
+                    }
+
                     // Habits Section - Daily Checklist
                     if !data.habits.isEmpty {
                         HabitsSection(habits: data.habits)
@@ -236,6 +258,80 @@ struct TodayView: View {
             #endif
             .searchable(text: $searchText, prompt: "Search reminders")
         }
+        .task {
+            await briefingVM.refreshIfNeeded(reminders: reminderSummaries)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
+            }
+        }
+        .onChange(of: reminders) { _, _ in
+            // Data may finish loading (e.g. CloudKit sync) after the first pass.
+            Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
+        }
+    }
+}
+
+// MARK: - Morning Briefing Card (in-app, path b)
+
+/// A dismissible card shown once per day at the top of the Today screen with an
+/// AI-prioritized (or locally-summarized) briefing. Renders nothing when hidden.
+struct MorningBriefingCard: View {
+    let state: MorningBriefingViewModel.DisplayState
+    let onDismiss: () -> Void
+
+    var body: some View {
+        switch state {
+        case .hidden:
+            EmptyView()
+
+        case .loading:
+            container {
+                HStack(spacing: Constants.Spacing.sm) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Preparing your morning briefing…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+
+        case .shown(let briefing):
+            container {
+                VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
+                    HStack(spacing: Constants.Spacing.xs) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(AppColors.accent)
+                        Text("Morning Briefing")
+                            .font(.headline)
+                        Spacer()
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Dismiss briefing")
+                    }
+                    Text(briefing.inAppBriefing)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func container<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .padding(Constants.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
+                    .fill(AppColors.accent.opacity(0.10))
+            )
     }
 }
 

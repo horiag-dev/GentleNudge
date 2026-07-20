@@ -164,6 +164,122 @@ final class ChatToolParsingTests: XCTestCase {
     }
 }
 
+// MARK: - Morning briefing tests (selection / prompt / parsing)
+
+final class MorningBriefingTests: XCTestCase {
+    private let tz = TimeZone(identifier: "America/New_York")!
+
+    private func calendar() -> Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = tz
+        return cal
+    }
+
+    /// A start-of-day date `days` from the fixed reference (2026-07-19).
+    private func day(_ offset: Int, from reference: Date) -> Date {
+        calendar().date(byAdding: .day, value: offset, to: reference)!
+    }
+
+    private func summary(
+        _ title: String,
+        due: Date?,
+        category: String? = "Work",
+        isHabit: Bool = false,
+        isCompleted: Bool = false
+    ) -> MorningBriefingService.ReminderSummary {
+        .init(title: title, categoryName: category, dueDate: due, isHabit: isHabit, isCompleted: isCompleted)
+    }
+
+    private var reference: Date {
+        ReminderRepository.parseDate("2026-07-19", timeZone: tz)!
+    }
+
+    func test_selectCandidates_ordersOverdueThenTodayThenUpcoming_andExcludesHabitsCompletedUndatedFar() {
+        let ref = reference
+        let reminders = [
+            summary("Far away", due: day(10, from: ref)),          // excluded (beyond upcoming window)
+            summary("Upcoming soon", due: day(2, from: ref)),      // upcoming
+            summary("Due today", due: ref),                        // due today
+            summary("Very overdue", due: day(-5, from: ref)),      // overdue (most)
+            summary("Slightly overdue", due: day(-1, from: ref)),  // overdue (less)
+            summary("A habit", due: day(-3, from: ref), isHabit: true),      // excluded
+            summary("Done", due: day(-2, from: ref), isCompleted: true),     // excluded
+            summary("No date", due: nil)                            // excluded
+        ]
+
+        let result = MorningBriefingService.selectCandidates(
+            from: reminders, referenceDate: ref, calendar: calendar()
+        )
+
+        XCTAssertEqual(result.map { $0.title }, [
+            "Very overdue", "Slightly overdue", "Due today", "Upcoming soon"
+        ])
+        XCTAssertEqual(result.map { $0.bucket }, [.overdue, .overdue, .dueToday, .upcoming])
+    }
+
+    func test_selectCandidates_respectsLimit() {
+        let ref = reference
+        let reminders = (0..<20).map { summary("Overdue \($0)", due: day(-($0 + 1), from: ref)) }
+        let result = MorningBriefingService.selectCandidates(
+            from: reminders, referenceDate: ref, calendar: calendar(), limit: 5
+        )
+        XCTAssertEqual(result.count, 5)
+    }
+
+    func test_buildUserPrompt_containsDateAndBucketHeaders() {
+        let ref = reference
+        let candidates = MorningBriefingService.selectCandidates(
+            from: [
+                summary("Pay rent", due: day(-3, from: ref), category: "Finance"),
+                summary("Submit report", due: ref, category: "Work"),
+                summary("Dentist", due: day(2, from: ref), category: "Health")
+            ],
+            referenceDate: ref, calendar: calendar()
+        )
+        let prompt = MorningBriefingService.buildUserPrompt(
+            candidates: candidates, referenceDate: ref, calendar: calendar(), timeZone: tz
+        )
+        XCTAssertTrue(prompt.contains("2026-07-19"))
+        XCTAssertTrue(prompt.contains("OVERDUE"))
+        XCTAssertTrue(prompt.contains("DUE TODAY"))
+        XCTAssertTrue(prompt.contains("COMING UP"))
+        XCTAssertTrue(prompt.contains("Pay rent (Finance) — 3 days ago"))
+        XCTAssertTrue(prompt.contains("Dentist (Health) — in 2 days"))
+    }
+
+    func test_parse_labeledResponse_splitsBothFields() {
+        let raw = """
+        NOTIFICATION: Start with the rent payment — it's overdue.
+        BRIEFING: Pay the rent first, it's three days late. Then submit the report due today. The dentist is coming up in two days.
+        """
+        let briefing = MorningBriefingService.parse(raw)
+        XCTAssertEqual(briefing?.notificationBody, "Start with the rent payment — it's overdue.")
+        XCTAssertTrue(briefing?.inAppBriefing.hasPrefix("Pay the rent first") ?? false)
+    }
+
+    func test_parse_unlabeledBlob_usedForBothWithFirstSentenceNotification() {
+        let briefing = MorningBriefingService.parse("Pay the rent first. Then the report.")
+        XCTAssertEqual(briefing?.notificationBody, "Pay the rent first.")
+        XCTAssertEqual(briefing?.inAppBriefing, "Pay the rent first. Then the report.")
+    }
+
+    func test_parse_emptyReturnsNil() {
+        XCTAssertNil(MorningBriefingService.parse("   \n  "))
+    }
+
+    func test_localFallbackBriefing_nonEmptyAndNamesTopItem() {
+        let ref = reference
+        let candidates = MorningBriefingService.selectCandidates(
+            from: [summary("Pay rent", due: day(-3, from: ref), category: "Finance")],
+            referenceDate: ref, calendar: calendar()
+        )
+        let briefing = MorningBriefingService.localFallbackBriefing(candidates: candidates)
+        XCTAssertFalse(briefing.notificationBody.isEmpty)
+        XCTAssertFalse(briefing.inAppBriefing.isEmpty)
+        XCTAssertTrue(briefing.notificationBody.contains("Pay rent"))
+    }
+}
+
 // MARK: - Phase 3 executor tests (find / update / complete)
 
 /// Exercises the new repository executors against an in-memory store. Seed and

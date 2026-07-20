@@ -6,6 +6,7 @@ import SwiftData
 
 struct MacContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
@@ -14,7 +15,21 @@ struct MacContentView: View {
     @State private var showingAddReminder = false
     @State private var showingSettings = false
     @State private var searchText = ""
+    @State private var briefingVM = MorningBriefingViewModel()
     @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
+
+    /// Lightweight, Sendable snapshots for the once-a-day briefing.
+    private var reminderSummaries: [MorningBriefingService.ReminderSummary] {
+        reminders.map {
+            MorningBriefingService.ReminderSummary(
+                title: $0.title,
+                categoryName: $0.category?.name,
+                dueDate: $0.dueDate,
+                isHabit: $0.isHabit,
+                isCompleted: $0.isCompleted
+            )
+        }
+    }
 
     enum SidebarItem: Hashable {
         case chat
@@ -317,6 +332,18 @@ struct MacContentView: View {
                 selectedSidebarItem = .today
             }
         }
+        .task {
+            await briefingVM.refreshIfNeeded(reminders: reminderSummaries)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
+            }
+        }
+        .onChange(of: reminders) { _, _ in
+            // Data may finish loading (e.g. CloudKit sync) after the first pass.
+            Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
+        }
     }
 
     // MARK: - Today List View (matches iOS TodayView order)
@@ -324,6 +351,11 @@ struct MacContentView: View {
     private var todayListView: some View {
         ScrollView {
             LazyVStack(spacing: 16) {
+                // AI morning briefing (once per day, dismissible)
+                MorningBriefingCard(state: briefingVM.state) {
+                    withAnimation(Constants.Animation.standard) { briefingVM.dismiss() }
+                }
+
                 // All-clear state
                 if (!showHabits || habitReminders.isEmpty)
                     && needsAttentionReminders.isEmpty

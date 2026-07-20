@@ -59,6 +59,7 @@
 				Services/ChatCoordinator.swift,
 				Services/ChatTools.swift,
 				Services/ClaudeService.swift,
+				Services/MorningBriefingService.swift,
 				Services/ReminderRepository.swift,
 				Services/URLMetadataService.swift,
 				Utilities/Constants.swift,

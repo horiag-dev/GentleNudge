@@ -53,6 +53,20 @@ struct ContentView: View {
         Array(tomorrowNeedsAttentionItems.prefix(5).map { $0.title })
     }
 
+    /// Lightweight, Sendable snapshots of every reminder for off-main
+    /// briefing generation (the service selects the candidates itself).
+    private var reminderSummaries: [MorningBriefingService.ReminderSummary] {
+        reminders.map {
+            MorningBriefingService.ReminderSummary(
+                title: $0.title,
+                categoryName: $0.category?.name,
+                dueDate: $0.dueDate,
+                isHabit: $0.isHabit,
+                isCompleted: $0.isCompleted
+            )
+        }
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             TodayView()
@@ -135,11 +149,15 @@ struct ContentView: View {
                     )
                 }
             } else if newPhase == .background {
-                // Update scheduled notification when app goes to background
-                // Use TOMORROW's data since the notification fires tomorrow morning
-                NotificationService.shared.updateScheduledNotificationContent(
+                // Update scheduled notification when app goes to background.
+                // Use TOMORROW's data since the notification fires tomorrow morning.
+                // This pre-generates an AI-prioritized body inside a background-task
+                // window and always schedules the non-AI fallback first, so the
+                // notification is never empty or worse than today.
+                NotificationService.shared.preGenerateAndScheduleMorningNotification(
                     needsAttentionCount: tomorrowNeedsAttentionCount,
-                    topItems: tomorrowTopItemTitles
+                    topItems: tomorrowTopItemTitles,
+                    reminders: reminderSummaries
                 )
             }
         }
