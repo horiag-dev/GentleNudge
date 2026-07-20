@@ -17,7 +17,7 @@ struct ChatView: View {
 
     @State private var draft = ""
     @State private var hasAPIKey = Constants.isAPIKeyConfigured
-    @State private var approvalPresenter = CategoryApprovalPresenter()
+    @State private var confirmationPresenter = ConfirmationPresenter()
     @FocusState private var inputFocused: Bool
 
     private let bottomID = "chat-bottom-anchor"
@@ -53,7 +53,7 @@ struct ChatView: View {
         .background(AppColors.background)
         .onAppear {
             refreshKeyState()
-            wireApprovalHook()
+            wireConfirmationHooks()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshKeyState() }
@@ -151,6 +151,14 @@ struct ChatView: View {
                 summary: summary,
                 snapshot: snapshot
             )
+        case .findResult(_, let query, let rows, let total):
+            FindResultCard(query: query, rows: rows, totalMatches: total)
+        case .updateCard(_, _, let title, let changes):
+            UpdateDiffCard(title: title, changes: changes)
+        case .completionCard(_, _, let title, let isCompleted, let detail, let isUndo):
+            CompletionCard(title: title, isCompleted: isCompleted, detail: detail, isUndo: isUndo)
+        case .deletedCard(_, let title):
+            DeletedCard(title: title)
         }
     }
 
@@ -167,11 +175,11 @@ struct ChatView: View {
                 )
             }
 
-            if let pending = approvalPresenter.pending {
-                CategoryApprovalCard(
-                    name: pending.name,
-                    onApprove: { approvalPresenter.resolve(true) },
-                    onCancel: { approvalPresenter.resolve(false) }
+            if let pending = confirmationPresenter.pending {
+                ConfirmationCard(
+                    pending: pending,
+                    onConfirm: { confirmationPresenter.resolve(true) },
+                    onCancel: { confirmationPresenter.resolve(false) }
                 )
             }
 
@@ -247,8 +255,8 @@ struct ChatView: View {
     }
 
     private func startNewChat() {
-        // Unblock any pending category gate so a stale continuation can't leak.
-        approvalPresenter.resolve(false)
+        // Unblock any pending confirmation gate so a stale continuation can't leak.
+        confirmationPresenter.resolve(false)
         coordinator.newChat()
         draft = ""
         inputFocused = true
@@ -262,11 +270,26 @@ struct ChatView: View {
         hasAPIKey = Constants.isAPIKeyConfigured
     }
 
-    /// Replace the coordinator's default-deny stub with the in-chat gate.
-    private func wireApprovalHook() {
-        let presenter = approvalPresenter
+    /// Replace the coordinator's default-deny stubs with the in-chat gates. Both
+    /// the category-creation and reminder-deletion gates share one presenter (only
+    /// one is ever pending at a time — turns are single-in-flight).
+    private func wireConfirmationHooks() {
+        let presenter = confirmationPresenter
         coordinator.categoryApprovalHook = { name in
-            await presenter.request(name: name)
+            await presenter.request(
+                title: "Create a new category?",
+                message: "The assistant wants to create the category “\(name)”. Approve to add it, or cancel to pick an existing one.",
+                confirmLabel: "Approve",
+                isDestructive: false
+            )
+        }
+        coordinator.deletionApprovalHook = { title in
+            await presenter.request(
+                title: "Delete this reminder?",
+                message: "The assistant wants to permanently delete “\(title)”. This can't be undone.",
+                confirmLabel: "Delete",
+                isDestructive: true
+            )
         }
     }
 

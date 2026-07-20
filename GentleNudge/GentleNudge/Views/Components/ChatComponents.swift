@@ -1,33 +1,37 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - Category-creation approval gate
+// MARK: - Confirmation gate (generalized)
 
-/// Drives the in-chat Approve/Cancel gate for `create_category`. `ChatView` owns
-/// one of these, wires `coordinator.categoryApprovalHook` to `request(name:)`, and
-/// renders `pending` as a card. The tool executor suspends inside `request` until
-/// the user taps, which calls `resolve(_:)` — replacing the coordinator's
-/// default-deny stub with a real user decision (§2.5).
+/// Drives the in-chat Approve/Cancel gate for any destructive or taxonomy-mutating
+/// tool (`create_category`, `delete_reminder`, and future bulk ops). `ChatView`
+/// owns one of these, wires the coordinator's approval hooks to `request(...)`, and
+/// renders `pending` as a `ConfirmationCard`. The tool executor suspends inside
+/// `request` until the user taps, which calls `resolve(_:)` — replacing the
+/// coordinator's default-deny stub with a real user decision (§2.5, §2.6).
 @MainActor
 @Observable
-final class CategoryApprovalPresenter {
+final class ConfirmationPresenter {
     struct Pending: Identifiable {
         let id = UUID()
-        let name: String
+        let title: String
+        let message: String
+        let confirmLabel: String
+        let isDestructive: Bool
     }
 
     private(set) var pending: Pending?
     private var continuation: CheckedContinuation<Bool, Never>?
 
-    /// Suspends until the user resolves the gate. Safe to `await` from the
-    /// coordinator's `@Sendable` hook — hops to the main actor here.
-    func request(name: String) async -> Bool {
-        // Defensively resolve any orphaned prior request (shouldn't happen: turns
-        // are single-in-flight and tool_uses execute serially).
+    /// Suspends until the user resolves the gate. Safe to `await` from a
+    /// coordinator `@Sendable` hook — hops to the main actor here. Only one gate is
+    /// ever pending at a time (turns are single-in-flight; tool_uses run serially).
+    func request(title: String, message: String, confirmLabel: String, isDestructive: Bool) async -> Bool {
+        // Defensively resolve any orphaned prior request.
         continuation?.resume(returning: false)
         continuation = nil
         return await withCheckedContinuation { cont in
-            self.pending = Pending(name: name)
+            self.pending = Pending(title: title, message: message, confirmLabel: confirmLabel, isDestructive: isDestructive)
             self.continuation = cont
         }
     }
@@ -334,35 +338,301 @@ struct ReminderCardView: View {
     }
 }
 
-// MARK: - Category approval card
+// MARK: - Confirmation card (shared Approve/Cancel gate)
 
-struct CategoryApprovalCard: View {
-    let name: String
-    let onApprove: () -> Void
+/// Renders the pending confirmation for a gated tool. Used for both
+/// `create_category` (additive, accent-tinted) and `delete_reminder` (destructive,
+/// red-tinted), driven by `ConfirmationPresenter.pending`.
+struct ConfirmationCard: View {
+    let pending: ConfirmationPresenter.Pending
+    let onConfirm: () -> Void
     let onCancel: () -> Void
+
+    private var tint: Color { pending.isDestructive ? .red : .accentColor }
+    private var icon: String { pending.isDestructive ? "trash" : "folder.badge.plus" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Create a new category?", systemImage: "folder.badge.plus")
+            Label(pending.title, systemImage: icon)
                 .font(.subheadline.weight(.semibold))
-            Text("The assistant wants to create the category “\(name)”. Approve to add it, or cancel to pick an existing one.")
+            Text(pending.message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 12) {
-                Button("Approve") { onApprove() }
+                Button(pending.confirmLabel, role: pending.isDestructive ? .destructive : nil) { onConfirm() }
                     .buttonStyle(.borderedProminent)
+                    .tint(tint)
                 Button("Cancel", role: .cancel) { onCancel() }
                     .buttonStyle(.bordered)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.10))
+        .background(tint.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.accentColor.opacity(0.4), lineWidth: 1)
+                .stroke(tint.opacity(0.4), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - find_reminders result card
+
+/// A compact result list for `find_reminders`: header count, up to 5 tappable
+/// rows, and a "+N more" overflow. Tapping a row opens that reminder's detail
+/// sheet (the "jump to it in the app" affordance).
+struct FindResultCard: View {
+    let query: String?
+    let rows: [FindRow]
+    let totalMatches: Int
+
+    @State private var selected: FindRow?
+
+    private var visibleRows: [FindRow] { Array(rows.prefix(5)) }
+    private var overflow: Int { max(0, totalMatches - visibleRows.count) }
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(headerText, systemImage: "magnifyingglass")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                if rows.isEmpty {
+                    Text("No matching reminders.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(visibleRows) { row in
+                            Button { selected = row } label: { FindResultRow(row: row) }
+                                .buttonStyle(.plain)
+                            if row.id != visibleRows.last?.id { Divider() }
+                        }
+                    }
+                    if overflow > 0 {
+                        Text("+\(overflow) more")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 2)
+                    }
+                }
+            }
+            .frame(maxWidth: 420, alignment: .leading)
+            .padding(12)
+            .background(AppColors.secondaryBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Spacer(minLength: 40)
+        }
+        .sheet(item: $selected) { row in
+            ReminderDetailLoader(reminderID: row.id, fallbackTitle: row.title)
+        }
+    }
+
+    private var headerText: String {
+        let noun = totalMatches == 1 ? "reminder" : "reminders"
+        if let query, !query.isEmpty {
+            return "\(totalMatches) \(noun) matching “\(query)”"
+        }
+        return "\(totalMatches) \(noun)"
+    }
+}
+
+struct FindResultRow: View {
+    let row: FindRow
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: row.isCompleted ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(row.isCompleted ? .green : (row.isOverdue ? .red : .secondary))
+                .font(.caption)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title)
+                    .font(.subheadline)
+                    .strikethrough(row.isCompleted)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if let due = row.dueDisplay {
+                        Label(due, systemImage: "calendar")
+                            .foregroundStyle(row.isOverdue ? .red : .secondary)
+                    }
+                    if let category = row.category { Text(category) }
+                    if let recurrence = row.recurrence {
+                        Label(recurrence, systemImage: "repeat")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .labelStyle(.titleAndIcon)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Loads one reminder by UUID for the find-result "jump to" sheet. Live-binds via
+/// a dynamic `@Query`; shows a muted fallback if the reminder has since vanished.
+struct ReminderDetailLoader: View {
+    @Environment(\.dismiss) private var dismiss
+    let fallbackTitle: String
+    @Query private var matches: [Reminder]
+
+    init(reminderID: UUID, fallbackTitle: String) {
+        self.fallbackTitle = fallbackTitle
+        let id = reminderID
+        _matches = Query(filter: #Predicate<Reminder> { $0.id == id })
+    }
+
+    var body: some View {
+        if let reminder = matches.first {
+            detail(reminder)
+        } else {
+            missing
+        }
+    }
+
+    @ViewBuilder
+    private func detail(_ reminder: Reminder) -> some View {
+        #if os(iOS)
+        NavigationStack {
+            ReminderDetailView(reminder: reminder)
+        }
+        #else
+        NavigationStack {
+            ReminderDetailView(reminder: reminder)
+                .frame(minWidth: 420, minHeight: 560)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        #endif
+    }
+
+    private var missing: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "tray")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("“\(fallbackTitle)” is no longer available.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Close") { dismiss() }
+        }
+        .padding(40)
+    }
+}
+
+// MARK: - update_reminder diff card
+
+struct UpdateDiffCard: View {
+    let title: String
+    let changes: [ReminderFieldChange]
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "pencil.circle.fill")
+                        .foregroundStyle(.blue)
+                    Text("Updated \(title)")
+                        .font(.subheadline.weight(.semibold))
+                }
+                ForEach(changes) { change in
+                    HStack(spacing: 4) {
+                        Text(change.label)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "arrow.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text(change.value)
+                    }
+                    .font(.caption)
+                    .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: 420, alignment: .leading)
+            .padding(12)
+            .background(AppColors.secondaryBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Spacer(minLength: 40)
+        }
+    }
+}
+
+// MARK: - complete / uncomplete card
+
+struct CompletionCard: View {
+    let title: String
+    let isCompleted: Bool
+    let detail: String?
+    let isUndo: Bool
+
+    private var icon: String { isUndo ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill" }
+    private var tint: Color { isUndo ? .orange : .green }
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundStyle(tint)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .strikethrough(isCompleted && !isUndo)
+                    if let detail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: 420, alignment: .leading)
+            .padding(12)
+            .background(AppColors.secondaryBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Spacer(minLength: 40)
+        }
+    }
+}
+
+// MARK: - delete result card (muted)
+
+struct DeletedCard: View {
+    let title: String
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 8) {
+                Image(systemName: "trash")
+                    .foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .strikethrough()
+                    Text("Deleted")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: 420, alignment: .leading)
+            .padding(12)
+            .background(AppColors.secondaryBackground.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Spacer(minLength: 40)
+        }
     }
 }
 

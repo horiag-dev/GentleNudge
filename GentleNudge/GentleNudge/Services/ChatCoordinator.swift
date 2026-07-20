@@ -12,6 +12,14 @@ enum TranscriptItem: Identifiable, Sendable {
     case assistant(id: UUID, text: String)
     case reminderCard(id: UUID, reminderID: UUID, title: String, summary: String, snapshot: ReminderSnapshot)
     case notice(id: UUID, text: String)
+    /// `find_reminders` result: a compact list (card shows ≤5 rows + "+N more").
+    case findResult(id: UUID, query: String?, rows: [FindRow], totalMatches: Int)
+    /// `update_reminder` diff card ("Moved Dentist → Fri, Jul 24").
+    case updateCard(id: UUID, reminderID: UUID, title: String, changes: [ReminderFieldChange])
+    /// `complete_reminder` / `uncomplete_reminder` checkmark-or-undo card.
+    case completionCard(id: UUID, reminderID: UUID, title: String, isCompleted: Bool, detail: String?, isUndo: Bool)
+    /// `delete_reminder` muted "Deleted" result (shown after the confirmation gate).
+    case deletedCard(id: UUID, title: String)
 
     var id: UUID {
         switch self {
@@ -20,6 +28,14 @@ enum TranscriptItem: Identifiable, Sendable {
              .notice(let id, _):
             return id
         case .reminderCard(let id, _, _, _, _):
+            return id
+        case .findResult(let id, _, _, _):
+            return id
+        case .updateCard(let id, _, _, _):
+            return id
+        case .completionCard(let id, _, _, _, _, _):
+            return id
+        case .deletedCard(let id, _):
             return id
         }
     }
@@ -80,6 +96,11 @@ final class ChatCoordinator {
     /// Confirmation gate for `create_category`. Defaults to deny until 2b wires
     /// an Approve/Cancel card. Returns true to approve creation.
     var categoryApprovalHook: @Sendable (_ name: String) async -> Bool = { _ in false }
+
+    /// Confirmation gate for the destructive `delete_reminder`. Defaults to deny
+    /// until `ChatView` wires the shared Approve/Cancel card. Returns true to
+    /// approve deletion. Reuses the same presenter seam as the category gate.
+    var deletionApprovalHook: @Sendable (_ title: String) async -> Bool = { _ in false }
 
     // Wire history: the API `messages` array (full content blocks, tool_use /
     // tool_result pairs intact). Separate from `transcript`.
@@ -397,6 +418,19 @@ final class ChatCoordinator {
                 return "Creating “\(categoryName)”"
             }
             return "Creating category"
+        case "find_reminders":
+            return "Looking up reminders"
+        case "update_reminder":
+            if let title = input["title"]?.stringValue, !title.isEmpty {
+                return "Updating “\(title)”"
+            }
+            return "Updating reminder"
+        case "complete_reminder":
+            return "Completing reminder"
+        case "uncomplete_reminder":
+            return "Updating reminder"
+        case "delete_reminder":
+            return "Deleting reminder"
         default:
             return "Working"
         }
@@ -455,6 +489,77 @@ final class ChatCoordinator {
             let card: TranscriptItem? = result.isError
                 ? nil
                 : .notice(id: UUID(), text: "Created category \(result.displayTitle ?? parsed.name)")
+            return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
+
+        case "find_reminders":
+            guard let parsed = Self.parseFindReminders(input) else {
+                return ToolExecutionResult(
+                    content: "The find_reminders arguments were malformed. Provide query, category_id, status, due_from, due_to, and overdue_only.",
+                    isError: true,
+                    card: nil
+                )
+            }
+            let result = await repository.findReminders(parsed, timeZone: context.timeZone)
+            let card: TranscriptItem? = result.isError
+                ? nil
+                : .findResult(id: UUID(), query: result.query, rows: result.rows, totalMatches: result.totalMatches)
+            return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
+
+        case "update_reminder":
+            guard let parsed = Self.parseUpdateReminder(input) else {
+                return ToolExecutionResult(
+                    content: "The update_reminder arguments were malformed. Provide id plus the fields to change (nulls leave a field unchanged).",
+                    isError: true,
+                    card: nil
+                )
+            }
+            let result = await repository.updateReminder(parsed, timeZone: context.timeZone)
+            let card: TranscriptItem? = {
+                guard !result.isError, !result.changes.isEmpty, let rid = result.reminderID else { return nil }
+                return .updateCard(id: UUID(), reminderID: rid, title: result.title ?? "Reminder", changes: result.changes)
+            }()
+            return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
+
+        case "complete_reminder":
+            guard let id = Self.parseReminderID(input) else {
+                return ToolExecutionResult(content: "The complete_reminder arguments were malformed. Provide the reminder id.", isError: true, card: nil)
+            }
+            let result = await repository.completeReminder(id: id, timeZone: context.timeZone)
+            let card: TranscriptItem? = {
+                guard !result.isError, let rid = result.reminderID else { return nil }
+                return .completionCard(id: UUID(), reminderID: rid, title: result.title ?? "Reminder", isCompleted: result.isCompleted, detail: result.detail, isUndo: false)
+            }()
+            return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
+
+        case "uncomplete_reminder":
+            guard let id = Self.parseReminderID(input) else {
+                return ToolExecutionResult(content: "The uncomplete_reminder arguments were malformed. Provide the reminder id.", isError: true, card: nil)
+            }
+            let result = await repository.uncompleteReminder(id: id, timeZone: context.timeZone)
+            let card: TranscriptItem? = {
+                guard !result.isError, let rid = result.reminderID else { return nil }
+                return .completionCard(id: UUID(), reminderID: rid, title: result.title ?? "Reminder", isCompleted: result.isCompleted, detail: result.detail, isUndo: true)
+            }()
+            return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
+
+        case "delete_reminder":
+            guard let id = Self.parseReminderID(input) else {
+                return ToolExecutionResult(content: "The delete_reminder arguments were malformed. Provide the reminder id.", isError: true, card: nil)
+            }
+            // Look up the title first so the confirmation card shows what will go.
+            guard let title = await repository.reminderTitle(id: id) else {
+                return ToolExecutionResult(content: "No reminder with id \(id) exists. Run find_reminders again.", isError: true, card: nil)
+            }
+            // Confirmation gate: blocks until the user approves or cancels.
+            let approved = await deletionApprovalHook(title)
+            guard approved else {
+                // Non-error so the model acknowledges the reminder was kept.
+                return ToolExecutionResult(content: "User declined to delete '\(title)'. The reminder was kept.", isError: false, card: nil)
+            }
+            let result = await repository.confirmDelete(id: id)
+            let card: TranscriptItem? = (result.isError || !result.didDelete)
+                ? nil
+                : .deletedCard(id: UUID(), title: result.title ?? title)
             return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
 
         default:
@@ -590,13 +695,58 @@ final class ChatCoordinator {
         )
     }
 
+    nonisolated static func parseFindReminders(_ input: JSONValue) -> FindRemindersInput? {
+        guard let status = input["status"]?.stringValue, !status.isEmpty else { return nil }
+        return FindRemindersInput(
+            query: nonEmpty(input["query"]?.stringValue),
+            categoryID: nonEmpty(input["category_id"]?.stringValue),
+            status: status,
+            dueFrom: nonEmpty(input["due_from"]?.stringValue),
+            dueTo: nonEmpty(input["due_to"]?.stringValue),
+            overdueOnly: input["overdue_only"]?.boolValue ?? false
+        )
+    }
+
+    nonisolated static func parseUpdateReminder(_ input: JSONValue) -> UpdateReminderInput? {
+        guard let id = input["id"]?.stringValue, !id.isEmpty else { return nil }
+        return UpdateReminderInput(
+            id: id,
+            // `null` → nil (unchanged); an empty string on `notes` explicitly clears.
+            title: input["title"]?.stringValue,
+            notes: input["notes"]?.stringValue,
+            dueDate: input["due_date"]?.stringValue,
+            clearDueDate: input["clear_due_date"]?.boolValue ?? false,
+            categoryID: input["category_id"]?.stringValue,
+            recurrence: input["recurrence"]?.stringValue,
+            recurrenceAnchorDay: input["recurrence_anchor_day"]?.intValue
+        )
+    }
+
+    nonisolated static func parseReminderID(_ input: JSONValue) -> String? {
+        guard let id = input["id"]?.stringValue, !id.isEmpty else { return nil }
+        return id
+    }
+
+    nonisolated private static func nonEmpty(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
     // MARK: Static system prompt (stable prefix)
 
     static let staticSystemPrompt: String = """
     You are the assistant inside GentleNudge, a personal reminders app. The user \
-    types (later: speaks) natural language and you turn each distinct task into a \
-    structured reminder by calling tools. Input may be speech-to-text; tolerate \
-    missing punctuation and homophones.
+    types (later: speaks) natural language and you manage their reminders by \
+    calling tools: create, view/search, change, complete, and delete. Input may be \
+    speech-to-text; tolerate missing punctuation and homophones.
+
+    Tools:
+    - create_reminder: add a new reminder.
+    - create_category: propose a new category (asks the user to confirm).
+    - find_reminders: search existing reminders; returns each match's exact id.
+    - update_reminder: change fields of one existing reminder.
+    - complete_reminder / uncomplete_reminder: mark a reminder done / not done.
+    - delete_reminder: permanently remove a reminder (asks the user to confirm).
 
     Behavior policy:
     - Optimistic auto-insert for creations: call create_reminder immediately once \
@@ -604,6 +754,20 @@ final class ChatCoordinator {
       "should I add this?" first.
     - One tool call per distinct task. A message with three todos means three \
       create_reminder calls.
+    - Managing existing reminders: ALWAYS call find_reminders first to get the \
+      exact id before update_reminder, complete_reminder, uncomplete_reminder, or \
+      delete_reminder. Never guess an id.
+    - Disambiguate, don't guess: if find_reminders returns more than one plausible \
+      match for what the user meant, ask a short question naming the candidates \
+      instead of acting on one. Act only when a single reminder clearly matches.
+    - Use find_reminders to answer "show me / what's due this week / what's \
+      overdue / what's in Finance" questions. Report only what the results contain.
+    - update_reminder changes fields; a null field is left unchanged. To move a \
+      reminder to another day, set due_date; to remove a date, set clear_due_date \
+      (this also clears recurrence). Do not set both.
+    - complete_reminder marks done (recurring items spawn their next occurrence; \
+      habits are marked done for today). Use uncomplete_reminder to undo. Only use \
+      delete_reminder when the user wants the reminder gone, not merely finished.
     - Clarify vs. assume: if content is genuinely ambiguous, ask one short \
       question. Otherwise proceed. If no date is given, create it undated \
       (due_date: null) — do not nag for a date.

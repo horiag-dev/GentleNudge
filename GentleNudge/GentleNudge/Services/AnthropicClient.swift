@@ -59,6 +59,12 @@ enum JSONValue: Codable, Sendable, Equatable {
         return nil
     }
 
+    /// The wrapped boolean, or nil for any other case.
+    var boolValue: Bool? {
+        if case let .bool(value) = self { return value }
+        return nil
+    }
+
     /// The wrapped integer. Accepts an integral `.double` as well.
     var intValue: Int? {
         switch self {
