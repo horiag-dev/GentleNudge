@@ -62,8 +62,14 @@ final class ChatCoordinator {
     // Observable UI state.
     private(set) var transcript: [TranscriptItem] = []
     private(set) var isRunning: Bool = false
-    /// Reserved for streaming (increment 2b / Phase 2); always nil for now.
-    var streamingText: String?
+    /// The assistant's live, token-by-token text for the in-flight turn. Rendered
+    /// as a streaming bubble while non-nil; committed to `transcript` and cleared
+    /// once the message completes.
+    private(set) var streamingText: String?
+    /// What the assistant is doing right now, driving the progress line that
+    /// replaces the static spinner: `.thinking` before/without text, `.working`
+    /// while a tool runs (e.g. "Adding “Pay rent”"). Nil when idle.
+    private(set) var activity: ChatActivity?
 
     /// The most recent retryable/authoritative transport error, surfaced by
     /// `ChatView` as an inline banner (with a Retry that resumes the idempotent
@@ -116,6 +122,7 @@ final class ChatCoordinator {
         wireMessages.append(MessageParam(role: "user", content: [.text(trimmed)]))
         isRunning = true
         streamingText = nil
+        activity = nil
 
         runTask = Task { [weak self] in
             await self?.executeTurn(generation: generation)
@@ -131,6 +138,7 @@ final class ChatCoordinator {
         transcript.removeAll()
         isRunning = false
         streamingText = nil
+        activity = nil
         lastError = nil
     }
 
@@ -146,6 +154,7 @@ final class ChatCoordinator {
         let generation = currentGeneration
         lastError = nil
         streamingText = nil
+        activity = nil
         // Defensive: never send a dangling assistant tool_use as the tail.
         sanitizeWireTail()
         guard !wireMessages.isEmpty else { return }
@@ -181,10 +190,18 @@ final class ChatCoordinator {
             if Task.isCancelled || generation != currentGeneration { return }
             iteration += 1
 
+            activity = .thinking
             let request = makeRequest(context: context, dynamicTail: dynamicTail)
-            let response: MessagesResponse
+
+            // Stream one assistant message. Text streams live into `streamingText`;
+            // tool_use inputs accumulate and are decoded whole on block-stop. A
+            // transport failure routes to the retryable error banner (§3.7).
+            let turn: StreamedTurn
             do {
-                response = try await sendWithRetry(request)
+                guard let streamed = try await streamAssistantMessage(request, generation: generation) else {
+                    return // cancelled / superseded
+                }
+                turn = streamed
             } catch {
                 finishWithError(error, generation: generation)
                 return
@@ -192,25 +209,28 @@ final class ChatCoordinator {
 
             if Task.isCancelled || generation != currentGeneration { return }
 
-            // Append the assistant message (blocks we understand) to wire history.
-            let assistantParams = response.content.compactMap { $0.asParam }
-            wireMessages.append(MessageParam(role: "assistant", content: assistantParams))
+            // Commit the streamed message (blocks we understand) to wire history,
+            // then retire the live streaming bubble.
+            wireMessages.append(MessageParam(role: "assistant", content: turn.assistantBlocks))
+            streamingText = nil
 
-            let assistantText = response.textContent
+            let assistantText = turn.assistantText
 
-            switch response.stop_reason {
+            switch turn.stopReason {
             case "tool_use":
                 if !assistantText.isEmpty {
                     transcript.append(.assistant(id: UUID(), text: assistantText))
                 }
 
                 var resultParams: [ContentBlockParam] = []
-                for tool in response.toolUses {
+                for tool in turn.toolUses {
                     let outcome: ToolExecutionResult
                     if let stored = replay.value(for: tool.id) {
                         // Idempotent replay: already executed this turn.
                         outcome = stored
                     } else {
+                        // Per-action progress line derived from the tool being executed.
+                        activity = .working(Self.activityPhrase(name: tool.name, input: tool.input))
                         let produced = await executeTool(
                             name: tool.name,
                             input: tool.input,
@@ -234,6 +254,7 @@ final class ChatCoordinator {
 
                 // One user message carrying ALL tool_results, order matching.
                 wireMessages.append(MessageParam(role: "user", content: resultParams))
+                activity = .thinking
 
                 // Circuit breaker: same tool erroring twice in one turn.
                 if toolErrorCounts.values.contains(where: { $0 >= 2 }) {
@@ -249,6 +270,7 @@ final class ChatCoordinator {
                 if !assistantText.isEmpty {
                     transcript.append(.assistant(id: UUID(), text: assistantText))
                 }
+                activity = nil
                 isRunning = false
                 return
 
@@ -271,12 +293,113 @@ final class ChatCoordinator {
                 if !assistantText.isEmpty {
                     transcript.append(.assistant(id: UUID(), text: assistantText))
                 }
+                activity = nil
                 isRunning = false
                 return
             }
         }
 
         finishWithNotice("That took too many steps. Please try a simpler request.", generation: generation)
+    }
+
+    // MARK: Streaming one assistant message
+
+    /// Accumulated result of streaming one assistant message: the wire content
+    /// blocks (text + tool_use, in order), the tool_use blocks to execute, the
+    /// visible text, and the stop reason / usage from `message_delta`.
+    private struct StreamedTurn {
+        var assistantBlocks: [ContentBlockParam] = []
+        var toolUses: [(id: String, name: String, input: JSONValue)] = []
+        var assistantText: String = ""
+        var stopReason: String?
+        var usage: Usage?
+    }
+
+    /// Consumes one SSE stream, publishing text deltas live into `streamingText`.
+    /// Returns the accumulated turn, or nil if cancelled/superseded mid-stream.
+    /// Applies a **single** auto-retry for a transient rate-limit/server error that
+    /// occurs *before any content was received* (mirroring the old `sendWithRetry`);
+    /// a failure after streaming has begun is thrown so the caller routes it to the
+    /// error banner — it never silently re-runs and risks duplicating side effects.
+    private func streamAssistantMessage(
+        _ request: MessagesRequest,
+        generation: Int
+    ) async throws -> StreamedTurn? {
+        var attempt = 0
+        while true {
+            var turn = StreamedTurn()
+            var textBlocks: [String] = []
+            var receivedEvent = false
+            streamingText = nil
+
+            do {
+                for try await event in client.stream(request) {
+                    if Task.isCancelled || generation != currentGeneration { return nil }
+                    receivedEvent = true
+                    switch event {
+                    case .messageStart:
+                        break
+                    case .textDelta(let text):
+                        streamingText = (streamingText ?? "") + text
+                        activity = nil // text is now the visible progress
+                    case .textBlockStopped(let text):
+                        if !text.isEmpty {
+                            turn.assistantBlocks.append(.text(text))
+                            textBlocks.append(text)
+                        }
+                    case .toolUseStarted:
+                        break
+                    case .toolUseStopped(let id, let name, let input):
+                        turn.assistantBlocks.append(.toolUse(id: id, name: name, input: input))
+                        turn.toolUses.append((id: id, name: name, input: input))
+                    case .messageDelta(let stopReason, let usage):
+                        turn.stopReason = stopReason
+                        turn.usage = usage
+                    case .messageStop:
+                        break
+                    }
+                }
+                turn.assistantText = textBlocks
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return turn
+            } catch let error as AnthropicError {
+                attempt += 1
+                if !receivedEvent, attempt <= 1, let delay = Self.autoRetryDelay(for: error) {
+                    streamingText = nil
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    if Task.isCancelled || generation != currentGeneration { return nil }
+                    continue
+                }
+                throw error
+            }
+        }
+    }
+
+    private static func autoRetryDelay(for error: AnthropicError) -> TimeInterval? {
+        switch error {
+        case .rateLimited(let retryAfter): return min(retryAfter ?? 2, 10)
+        case .serverError: return 1
+        default: return nil
+        }
+    }
+
+    /// Human-readable per-action progress phrase for the tool being executed.
+    nonisolated static func activityPhrase(name: String, input: JSONValue) -> String {
+        switch name {
+        case "create_reminder":
+            if let title = input["title"]?.stringValue, !title.isEmpty {
+                return "Adding “\(title)”"
+            }
+            return "Adding reminder"
+        case "create_category":
+            if let categoryName = input["name"]?.stringValue, !categoryName.isEmpty {
+                return "Creating “\(categoryName)”"
+            }
+            return "Creating category"
+        default:
+            return "Working"
+        }
     }
 
     // MARK: Tool execution dispatch
@@ -339,32 +462,6 @@ final class ChatCoordinator {
         }
     }
 
-    // MARK: Networking
-
-    private func sendWithRetry(_ request: MessagesRequest) async throws -> MessagesResponse {
-        var attempt = 0
-        while true {
-            do {
-                return try await client.send(request)
-            } catch let error as AnthropicError {
-                attempt += 1
-                switch error {
-                case .rateLimited(let retryAfter) where attempt <= 1:
-                    let delay = min(retryAfter ?? 2, 10)
-                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                    if Task.isCancelled { throw error }
-                    continue
-                case .serverError where attempt <= 1:
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    if Task.isCancelled { throw error }
-                    continue
-                default:
-                    throw error
-                }
-            }
-        }
-    }
-
     // MARK: Per-turn context
 
     private func freezeContext() -> TurnContext {
@@ -404,7 +501,8 @@ final class ChatCoordinator {
             tools: ChatTools.all,
             tool_choice: nil, // auto
             output_config: OutputConfig(effort: context.effort.rawValue),
-            thinking: ThinkingConfig(type: "disabled")
+            thinking: ThinkingConfig(type: "disabled"),
+            stream: nil // the client forces streaming on for its SSE path
         )
     }
 
@@ -453,6 +551,8 @@ final class ChatCoordinator {
     private func finishWithNotice(_ text: String, generation: Int) {
         guard generation == currentGeneration else { return }
         transcript.append(.notice(id: UUID(), text: text))
+        streamingText = nil
+        activity = nil
         isRunning = false
     }
 
@@ -460,6 +560,8 @@ final class ChatCoordinator {
     /// a plain notice, so `ChatView` can offer a Retry / Settings affordance.
     private func finishWithError(_ error: Error, generation: Int) {
         guard generation == currentGeneration else { return }
+        streamingText = nil
+        activity = nil
         lastError = ChatError(error)
         isRunning = false
     }
@@ -547,6 +649,17 @@ struct TurnContext {
 struct CategorySnapshot: Sendable {
     let id: UUID
     let name: String
+}
+
+// MARK: - Progress activity
+
+/// The in-flight assistant activity, surfaced as a live progress line that
+/// replaces the old static spinner.
+enum ChatActivity: Equatable, Sendable {
+    /// Reasoning / awaiting the first streamed token.
+    case thinking
+    /// A concrete action is running, e.g. "Adding “Pay rent”".
+    case working(String)
 }
 
 // MARK: - Banner error

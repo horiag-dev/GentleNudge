@@ -44,7 +44,9 @@ enum Constants {
     // to these keys via @AppStorage, and app code reads the resolved values below.
 
     static let defaultChatModel = ChatModel.opus
-    static let defaultReasoningEffort = ReasoningEffort.high
+    // Default to `medium`: reminder extraction is structured and latency-sensitive,
+    // so max effort isn't needed. Still user-overridable in Settings.
+    static let defaultReasoningEffort = ReasoningEffort.medium
 
     /// The user-selected chat model (defaults to Claude Opus 4.8).
     static var chatModel: ChatModel {

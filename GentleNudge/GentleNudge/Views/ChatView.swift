@@ -107,7 +107,14 @@ struct ChatView: View {
                     }
 
                     if coordinator.isRunning {
-                        ChatToolStatusRow()
+                        // Live assistant text as it streams…
+                        if let streaming = coordinator.streamingText, !streaming.isEmpty {
+                            ChatStreamingBubble(text: streaming)
+                        }
+                        // …and a per-action progress line ("Thinking…", "Adding …").
+                        if let activity = coordinator.activity {
+                            ChatActivityRow(activity: activity)
+                        }
                     }
 
                     Color.clear
@@ -117,8 +124,14 @@ struct ChatView: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // Let the user push the keyboard away by dragging the transcript, so
+            // the (keyboard-covered) tab bar is always reachable again on iOS.
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: coordinator.transcript.count) { _, _ in scrollToBottom(proxy) }
             .onChange(of: coordinator.isRunning) { _, _ in scrollToBottom(proxy) }
+            // Follow the streaming text without animating every token.
+            .onChange(of: coordinator.streamingText) { _, _ in proxy.scrollTo(bottomID, anchor: .bottom) }
+            .onChange(of: coordinator.activity) { _, _ in scrollToBottom(proxy) }
         }
     }
 
@@ -193,6 +206,16 @@ struct ChatView: View {
                     send()
                     return .handled
                 }
+                #if os(iOS)
+                // Always-reachable way to drop the software keyboard (which covers
+                // the tab bar) so the user can never get stuck in the Assistant.
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { inputFocused = false }
+                    }
+                }
+                #endif
 
             Button {
                 send()
@@ -214,7 +237,13 @@ struct ChatView: View {
         guard hasAPIKey, hasCategories, !coordinator.isRunning, !text.isEmpty else { return }
         coordinator.run(userText: text)
         draft = ""
+        // On macOS keep the field focused for rapid entry (no software keyboard to
+        // trap). On iOS, don't force-refocus: the keyboard covers the tab bar, and
+        // re-asserting focus is what trapped the user — leave dismissal to them
+        // (interactive scroll-dismiss + the keyboard's Done button).
+        #if os(macOS)
         inputFocused = true
+        #endif
     }
 
     private func startNewChat() {

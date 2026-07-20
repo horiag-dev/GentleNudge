@@ -120,6 +120,9 @@ struct MessagesRequest: Encodable, Sendable {
     let tool_choice: ToolChoice?
     let output_config: OutputConfig
     let thinking: ThinkingConfig
+    /// `true` for the SSE streaming path; omitted (nil) for the non-streaming
+    /// `send(_:)` path. Optional so the synthesized encoder drops it when nil.
+    let stream: Bool?
 }
 
 struct OutputConfig: Encodable, Sendable {
@@ -275,6 +278,42 @@ private struct APIErrorBody: Decodable {
     let error: Detail?
 }
 
+// MARK: - Streaming events
+
+/// A parsed, high-level SSE event. Text arrives incrementally (`textDelta`) for
+/// live rendering; a completed text block is also surfaced whole (`textBlockStopped`)
+/// so the consumer has an authoritative copy for wire history. Tool-use input is
+/// accumulated inside the client and only decoded once the block stops
+/// (`toolUseStopped`) — never mid-stream. Unknown event/block/delta types are
+/// tolerated and simply not surfaced.
+enum StreamEvent: Sendable {
+    case messageStart
+    /// A `tool_use` content block began. The input is not known yet; this only
+    /// carries the id/name so a UI can show early progress.
+    case toolUseStarted(id: String, name: String)
+    /// An incremental chunk of visible assistant text.
+    case textDelta(String)
+    /// A text content block finished; the full accumulated text.
+    case textBlockStopped(String)
+    /// A `tool_use` content block finished; its accumulated `partial_json` decoded.
+    case toolUseStopped(id: String, name: String, input: JSONValue)
+    /// `message_delta`: the final stop reason + usage for this message.
+    case messageDelta(stopReason: String?, usage: Usage?)
+    case messageStop
+}
+
+/// Per-content-block accumulation state while an SSE message streams in.
+private struct StreamBlockAccumulator {
+    enum Kind: Sendable {
+        case text
+        case toolUse(id: String, name: String)
+        case other
+    }
+    let kind: Kind
+    var text: String = ""
+    var partialJSON: String = ""
+}
+
 // MARK: - Client
 
 /// Non-streaming transport for the Anthropic Messages API, kept off the main
@@ -346,11 +385,218 @@ actor AnthropicClient {
         }
     }
 
+    // MARK: Streaming
+
+    /// SSE streaming transport. Sends `"stream": true`, validates the HTTP status
+    /// **before** consuming the byte stream (surfacing API error bodies as typed
+    /// `AnthropicError`s exactly like `send(_:)`), then parses the event stream
+    /// line-by-line and yields high-level `StreamEvent`s. The whole pipeline runs
+    /// off the main actor. Cancelling the consuming task (or dropping the stream)
+    /// cancels the underlying request.
+    nonisolated func stream(_ request: MessagesRequest) -> AsyncThrowingStream<StreamEvent, Error> {
+        let session = self.session
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await Self.runStream(request, session: session, continuation: continuation)
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private static func runStream(
+        _ request: MessagesRequest,
+        session: URLSession,
+        continuation: AsyncThrowingStream<StreamEvent, Error>.Continuation
+    ) async throws {
+        guard Constants.isAPIKeyConfigured else { throw AnthropicError.notConfigured }
+        guard let url = URL(string: Constants.claudeAPIURL) else { throw AnthropicError.invalidURL }
+
+        // Force streaming on regardless of what the caller built.
+        let streamingRequest = request.streamingCopy()
+
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
+        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "accept")
+        urlRequest.setValue(Constants.claudeAPIKey, forHTTPHeaderField: "x-api-key")
+        urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        do {
+            urlRequest.httpBody = try encoder.encode(streamingRequest)
+        } catch {
+            throw AnthropicError.decoding("Failed to encode request: \(error)")
+        }
+
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await session.bytes(for: urlRequest)
+        } catch {
+            throw AnthropicError.network(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw AnthropicError.invalidResponse
+        }
+
+        // Validate the HTTP status BEFORE consuming the event stream. On error,
+        // drain the (small) error body so we can surface a typed error.
+        guard http.statusCode == 200 else {
+            var body = Data()
+            for try await byte in bytes { body.append(byte) }
+            throw Self.streamError(status: http.statusCode, data: body, http: http)
+        }
+
+        var accumulators: [Int: StreamBlockAccumulator] = [:]
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            // SSE payloads are `data: {json}`. Blank lines separate events;
+            // `event:` name lines and `:` heartbeat comments carry no payload.
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+            if payload.isEmpty || payload == "[DONE]" { continue }
+            guard let data = payload.data(using: .utf8) else { continue }
+            try Self.handleSSEPayload(data, accumulators: &accumulators, continuation: continuation)
+        }
+    }
+
+    /// Parses one `data:` payload and yields the corresponding `StreamEvent`(s).
+    /// Tolerates unknown event/block/delta types by ignoring them.
+    private static func handleSSEPayload(
+        _ data: Data,
+        accumulators: inout [Int: StreamBlockAccumulator],
+        continuation: AsyncThrowingStream<StreamEvent, Error>.Continuation
+    ) throws {
+        guard let root = try? JSONDecoder().decode(JSONValue.self, from: data),
+              let type = root["type"]?.stringValue else { return }
+
+        switch type {
+        case "message_start":
+            continuation.yield(.messageStart)
+
+        case "content_block_start":
+            let index = root["index"]?.intValue ?? 0
+            let block = root["content_block"]
+            switch block?["type"]?.stringValue {
+            case "text":
+                accumulators[index] = StreamBlockAccumulator(kind: .text)
+            case "tool_use":
+                let id = block?["id"]?.stringValue ?? ""
+                let name = block?["name"]?.stringValue ?? ""
+                accumulators[index] = StreamBlockAccumulator(kind: .toolUse(id: id, name: name))
+                continuation.yield(.toolUseStarted(id: id, name: name))
+            default:
+                accumulators[index] = StreamBlockAccumulator(kind: .other)
+            }
+
+        case "content_block_delta":
+            let index = root["index"]?.intValue ?? 0
+            let delta = root["delta"]
+            switch delta?["type"]?.stringValue {
+            case "text_delta":
+                let text = delta?["text"]?.stringValue ?? ""
+                accumulators[index]?.text += text
+                if !text.isEmpty { continuation.yield(.textDelta(text)) }
+            case "input_json_delta":
+                // Accumulate — do NOT parse until the block stops.
+                accumulators[index]?.partialJSON += delta?["partial_json"]?.stringValue ?? ""
+            default:
+                break // tolerate thinking_delta, etc.
+            }
+
+        case "content_block_stop":
+            let index = root["index"]?.intValue ?? 0
+            if let acc = accumulators.removeValue(forKey: index) {
+                switch acc.kind {
+                case .text:
+                    continuation.yield(.textBlockStopped(acc.text))
+                case .toolUse(let id, let name):
+                    let input = Self.decodeJSONValue(acc.partialJSON) ?? .object([:])
+                    continuation.yield(.toolUseStopped(id: id, name: name, input: input))
+                case .other:
+                    break
+                }
+            }
+
+        case "message_delta":
+            let stopReason = root["delta"]?["stop_reason"]?.stringValue
+            continuation.yield(.messageDelta(stopReason: stopReason, usage: Self.decodeUsage(root["usage"])))
+
+        case "message_stop":
+            continuation.yield(.messageStop)
+
+        case "error":
+            let message = root["error"]?["message"]?.stringValue ?? "Streaming error"
+            throw AnthropicError.apiError(status: 200, message: message)
+
+        default:
+            break // ping and any unknown event type
+        }
+    }
+
+    private static func decodeJSONValue(_ string: String) -> JSONValue? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    private static func decodeUsage(_ value: JSONValue?) -> Usage? {
+        guard let value else { return nil }
+        return Usage(
+            input_tokens: value["input_tokens"]?.intValue,
+            output_tokens: value["output_tokens"]?.intValue,
+            cache_creation_input_tokens: value["cache_creation_input_tokens"]?.intValue,
+            cache_read_input_tokens: value["cache_read_input_tokens"]?.intValue
+        )
+    }
+
+    private static func streamError(status: Int, data: Data, http: HTTPURLResponse) -> AnthropicError {
+        switch status {
+        case 401:
+            return .authenticationFailed
+        case 429:
+            let retryAfter = http.value(forHTTPHeaderField: "retry-after").flatMap(TimeInterval.init)
+            return .rateLimited(retryAfter: retryAfter)
+        case 400:
+            return .badRequest(message: extractMessage(from: data) ?? "Bad request")
+        case 500...599:
+            return .serverError(status: status)
+        default:
+            return .apiError(status: status, message: extractMessage(from: data) ?? "Unexpected status")
+        }
+    }
+
     private static func extractMessage(from data: Data) -> String? {
         if let body = try? JSONDecoder().decode(APIErrorBody.self, from: data),
            let message = body.error?.message {
             return message
         }
         return String(data: data, encoding: .utf8)
+    }
+}
+
+private extension MessagesRequest {
+    /// A copy with `stream` forced on, for the SSE path.
+    func streamingCopy() -> MessagesRequest {
+        MessagesRequest(
+            model: model,
+            max_tokens: max_tokens,
+            system: system,
+            messages: messages,
+            tools: tools,
+            tool_choice: tool_choice,
+            output_config: output_config,
+            thinking: thinking,
+            stream: true
+        )
     }
 }

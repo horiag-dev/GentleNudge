@@ -98,19 +98,48 @@ struct ChatNoticeBubble: View {
     }
 }
 
-/// Compact status line shown while a turn is in flight. Non-streaming, so the
-/// wording is generic (a streamed variant lands in Phase 2).
-struct ChatToolStatusRow: View {
+/// The assistant's text as it streams in, token by token. Mirrors
+/// `ChatAssistantBubble`'s styling so the handoff to the committed transcript
+/// item is seamless when the message completes.
+struct ChatStreamingBubble: View {
+    let text: String
+
+    var body: some View {
+        HStack {
+            Text(ChatAssistantBubble.markdown(text))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(AppColors.secondaryBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .textSelection(.enabled)
+            Spacer(minLength: 40)
+        }
+    }
+}
+
+/// Live per-turn progress line: a spinner plus what the assistant is actually
+/// doing right now ("Thinking…", "Adding “Pay rent”…"). Replaces the old static
+/// "Working…" spinner.
+struct ChatActivityRow: View {
+    let activity: ChatActivity
+
     var body: some View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text("Working…")
+            Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 4)
+    }
+
+    private var label: String {
+        switch activity {
+        case .thinking: return "Thinking…"
+        case .working(let phrase): return "\(phrase)…"
+        }
     }
 }
 
