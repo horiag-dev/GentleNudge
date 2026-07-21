@@ -61,6 +61,8 @@
 				Services/ClaudeService.swift,
 				Services/MorningBriefingService.swift,
 				Services/ReminderRepository.swift,
+				Services/SpeechService.swift,
+				Services/SpeechSynthesizer.swift,
 				Services/URLMetadataService.swift,
 				Utilities/Constants.swift,
 				Utilities/Extensions.swift,
@@ -526,6 +528,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GentleNudge uses the microphone so you can speak to the assistant.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "GentleNudge converts your speech to text so you can dictate reminders.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -555,6 +559,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GentleNudge uses the microphone so you can speak to the assistant.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "GentleNudge converts your speech to text so you can dictate reminders.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

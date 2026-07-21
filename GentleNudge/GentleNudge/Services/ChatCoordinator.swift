@@ -121,6 +121,13 @@ final class ChatCoordinator {
     /// A batch completion at or above this size shows a brief confirmation first.
     static let bulkCompletionConfirmThreshold = 5
 
+    /// Fires with the assistant's final visible reply text when a turn completes
+    /// normally, so the voice layer (`SpeechSynthesizer`) can speak it. It never
+    /// fires for mid-tool assistant text, tool results/cards, notices, errors, or
+    /// streaming partials — only the terminal reply. Assigned by `ChatView`.
+    @ObservationIgnored
+    var onAssistantReply: (@MainActor (String) -> Void)?
+
     // Wire history: the API `messages` array (full content blocks, tool_use /
     // tool_result pairs intact). Separate from `transcript`.
     private var wireMessages: [MessageParam] = []
@@ -309,6 +316,7 @@ final class ChatCoordinator {
             case "end_turn", nil:
                 if !assistantText.isEmpty {
                     transcript.append(.assistant(id: UUID(), text: assistantText))
+                    onAssistantReply?(assistantText)
                 }
                 activity = nil
                 isRunning = false
@@ -332,6 +340,7 @@ final class ChatCoordinator {
             default:
                 if !assistantText.isEmpty {
                     transcript.append(.assistant(id: UUID(), text: assistantText))
+                    onAssistantReply?(assistantText)
                 }
                 activity = nil
                 isRunning = false

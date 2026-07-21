@@ -21,6 +21,13 @@ struct ChatView: View {
     @State private var confirmationPresenter = ConfirmationPresenter()
     @FocusState private var inputFocused: Bool
 
+    // Two-way voice: dictation (STT) into the draft + auto-send, and reading the
+    // assistant's replies aloud (TTS). Both are Apple-frameworks-only and degrade
+    // gracefully when unavailable/denied. See SpeechService / SpeechSynthesizer.
+    @State private var speech = SpeechService()
+    @State private var synthesizer = SpeechSynthesizer()
+    @State private var showMicDeniedAlert = false
+
     private let bottomID = "chat-bottom-anchor"
 
     private let examplePrompts = [
@@ -72,19 +79,42 @@ struct ChatView: View {
         .onAppear {
             refreshKeyState()
             wireConfirmationHooks()
+            wireVoice()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshKeyState() }
+        }
+        // Mirror the recognizer's live partial into the input field while listening.
+        .onChange(of: speech.partialTranscript) { _, newValue in
+            if speech.isListening { draft = newValue }
+        }
+        // Permission refused / unavailable → point the user at System Settings once.
+        .onChange(of: speech.authorizationDenied) { _, denied in
+            if denied { showMicDeniedAlert = true }
+        }
+        .alert("Microphone access needed", isPresented: $showMicDeniedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("To dictate messages, enable Microphone and Speech Recognition for GentleNudge in System Settings.")
         }
     }
 
     // MARK: Header
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 12) {
             Label("Assistant", systemImage: "sparkles")
                 .font(.headline)
             Spacer()
+            // TTS mute toggle: reads/persists `voiceRepliesEnabled`. Muting also
+            // stops any in-progress speech (handled in the synthesizer's setter).
+            Button {
+                synthesizer.voiceRepliesEnabled.toggle()
+            } label: {
+                Image(systemName: synthesizer.voiceRepliesEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+            }
+            .buttonStyle(.borderless)
+            .help(synthesizer.voiceRepliesEnabled ? "Assistant reads replies aloud (tap to mute)" : "Spoken replies muted (tap to unmute)")
             Button {
                 startNewChat()
             } label: {
@@ -219,7 +249,9 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message the assistant…", text: $draft, axis: .vertical)
+            micButton
+
+            TextField(speech.isListening ? "Listening…" : "Message the assistant…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
                 .focused($inputFocused)
@@ -245,17 +277,64 @@ struct ChatView: View {
                 }
                 #endif
 
-            Button {
-                send()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title)
-                    .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+            // While dictating, the trailing control cancels (mic-stop sends);
+            // otherwise it's the normal send button.
+            if speech.isListening {
+                Button {
+                    speech.cancel()
+                    draft = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title)
+                        .foregroundStyle(Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Cancel dictation")
+            } else {
+                Button {
+                    send()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title)
+                        .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .help("Send")
             }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .help("Send")
         }
+    }
+
+    /// Tap-to-talk mic. Starts/stops dictation; pulses red while listening. Stays
+    /// enabled while listening so a second tap can stop+send.
+    private var micButton: some View {
+        Button {
+            toggleDictation()
+        } label: {
+            Image(systemName: speech.isListening ? "stop.circle.fill" : "mic.circle.fill")
+                .font(.title)
+                .foregroundStyle(micTint)
+                .symbolEffect(.pulse, isActive: speech.isListening)
+        }
+        .buttonStyle(.plain)
+        .disabled(!micEnabled)
+        .help(micHelp)
+    }
+
+    private var micEnabled: Bool {
+        if speech.isListening { return true }
+        return hasAPIKey && hasCategories && !coordinator.isRunning && speech.isAvailable
+    }
+
+    private var micTint: Color {
+        if speech.isListening { return .red }
+        return micEnabled ? Color.accentColor : Color.secondary
+    }
+
+    private var micHelp: String {
+        if !speech.isAvailable { return "Speech recognition isn't available on this device" }
+        if speech.isListening { return "Stop and send" }
+        return "Dictate a message"
     }
 
     // MARK: Actions
@@ -263,6 +342,9 @@ struct ChatView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard hasAPIKey, hasCategories, !coordinator.isRunning, !text.isEmpty else { return }
+        // Ensure the mic engine isn't left running once a turn starts (e.g. if the
+        // user hit return mid-dictation). The final text is already in `draft`.
+        if speech.isListening { speech.cancel() }
         coordinator.run(userText: text)
         draft = ""
         // On macOS keep the field focused for rapid entry (no software keyboard to
@@ -284,6 +366,34 @@ struct ChatView: View {
 
     private func openSettings() {
         onOpenSettings?()
+    }
+
+    /// Tap-to-talk toggle. Starting listening stops any spoken reply first (so the
+    /// speaker never feeds back into the mic) and clears the draft; the recognizer
+    /// then streams its partial into the field. A second tap (or auto-stop on
+    /// silence) finishes → the final transcript auto-sends via `onFinalTranscript`.
+    private func toggleDictation() {
+        if speech.isListening {
+            speech.stop()
+        } else {
+            synthesizer.stop()
+            draft = ""
+            speech.start()
+        }
+    }
+
+    /// Connects the STT auto-send path and the TTS reply hook. Idempotent — safe
+    /// to call on every `onAppear`. The final transcript flows through the same
+    /// `send()` path as typed input; assistant replies are spoken only when the
+    /// turn ends normally (the coordinator's hook never fires for tool status).
+    private func wireVoice() {
+        speech.onFinalTranscript = { text in
+            draft = text
+            send()
+        }
+        coordinator.onAssistantReply = { [synthesizer] reply in
+            synthesizer.speak(reply)
+        }
     }
 
     private func refreshKeyState() {

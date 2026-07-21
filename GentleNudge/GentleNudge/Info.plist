@@ -2,8 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>GentleNudge uses the microphone so you can speak to the assistant.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Access to import and sync with Apple Reminders</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>GentleNudge converts your speech to text so you can dictate reminders.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

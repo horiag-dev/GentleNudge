@@ -74,6 +74,10 @@ enum Constants {
 
         /// Chat assistant reasoning effort (raw value of `ReasoningEffort`).
         static let reasoningEffort = "reasoningEffort"
+
+        /// Whether the assistant reads its replies aloud (voice output). Default
+        /// on; toggled by the speaker/mute control in the chat header.
+        static let voiceRepliesEnabled = "voiceRepliesEnabled"
     }
 
     // MARK: - UI
