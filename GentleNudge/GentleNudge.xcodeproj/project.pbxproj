@@ -83,6 +83,7 @@
 				Views/ReminderDetailView.swift,
 				Views/SettingsView.swift,
 				Views/TodayView.swift,
+				Views/VoiceModeView.swift,
 			);
 			target = 7710D8872F02299400E2701A /* Gentle Nudge Mac */;
 		};
