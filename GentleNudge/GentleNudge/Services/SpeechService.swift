@@ -51,11 +51,17 @@ final class SpeechService {
     @ObservationIgnored private let audioEngine = AVAudioEngine()
     @ObservationIgnored private var request: SFSpeechAudioBufferRecognitionRequest?
     @ObservationIgnored private var task: SFSpeechRecognitionTask?
+    /// Finalized segments of the current utterance. The server "finalizes" a
+    /// segment at every speech pause; we fold each one in here and keep listening,
+    /// so a mid-sentence pause never drops the earlier words. `partialTranscript`
+    /// is always `accumulated` + the live segment.
+    @ObservationIgnored private var accumulated = ""
     /// Debounced trailing-silence auto-stop. Reset on every partial result.
     @ObservationIgnored private var silenceTask: Task<Void, Never>?
 
     /// Seconds of no new recognition output before we auto-finish the utterance.
-    private let silenceTimeout: TimeInterval = 1.6
+    /// Generous enough to tolerate natural mid-sentence pauses.
+    private let silenceTimeout: TimeInterval = 2.0
 
     init() {
         // Prefer the user's locale; fall back to the recognizer's default.
@@ -108,17 +114,12 @@ final class SpeechService {
     // MARK: Listening
 
     private func beginListening(recognizer: SFSpeechRecognizer) throws {
-        // Drop any prior task before starting a fresh one.
-        task?.cancel()
-        task = nil
-
         #if os(iOS)
-        // Record + duck others; route to the speaker. Deactivated in teardown so
-        // the synthesizer can take the session for playback afterward.
+        // Record + duck others; route to speaker + Bluetooth (CarPlay / car audio).
+        // Deactivated in teardown so the synthesizer can take the session for
+        // playback afterward. `.default` mode (not `.measurement`, which minimizes
+        // input signal processing and can starve recognition).
         let session = AVAudioSession.sharedInstance()
-        // `.default` mode (not `.measurement`, which minimizes input signal
-        // processing and can starve recognition). Route to speaker + Bluetooth
-        // so it works over CarPlay / car audio.
         try session.setCategory(
             .playAndRecord,
             mode: .default,
@@ -127,14 +128,33 @@ final class SpeechService {
         try session.setActive(true, options: .notifyOthersOnDeactivation)
         #endif
 
+        accumulated = ""
+        partialTranscript = ""
+        isListening = true
+
+        // Install the tap + first recognition segment, then run the engine. The
+        // engine stays running across segment restarts (only the request/task and
+        // tap are swapped), so we keep capturing straight through pauses.
+        startRecognitionSegment(recognizer: recognizer)
+        audioEngine.prepare()
+        try audioEngine.start()
+
+        resetSilenceTimer()
+    }
+
+    /// Starts (or restarts) a single recognition segment against a fresh request,
+    /// re-pointing the mic tap at it. Called at the start of listening and again
+    /// each time the server finalizes a segment at a pause — the reinstall happens
+    /// during that pause, so no spoken words are lost.
+    private func startRecognitionSegment(recognizer: SFSpeechRecognizer) {
+        task?.cancel()
+        task = nil
+        request?.endAudio()
+
         let audioRequest = SFSpeechAudioBufferRecognitionRequest()
         audioRequest.shouldReportPartialResults = true
-        // Use server recognition (the default). Forcing `requiresOnDeviceRecognition`
-        // made recognition silently produce nothing: `supportsOnDeviceRecognition`
-        // can be true while the per-locale model isn't actually installed, so the
-        // task errors out with an empty transcript and the UI just sits on
-        // "Listening…". Server recognition is reliable whenever online. (A guarded
-        // on-device path for true offline use can be re-added later.)
+        // Server recognition (the default). Forcing `requiresOnDeviceRecognition`
+        // silently produced nothing when the per-locale model wasn't installed.
         request = audioRequest
 
         let inputNode = audioEngine.inputNode
@@ -146,32 +166,44 @@ final class SpeechService {
             audioRequest.append(buffer)
         }
 
-        audioEngine.prepare()
-        try audioEngine.start()
-
-        isListening = true
-        partialTranscript = ""
-
         task = recognizer.recognitionTask(with: audioRequest) { [weak self] result, error in
             // Recognition callbacks arrive off the main actor; hop back.
             Task { @MainActor [weak self] in
-                guard let self, self.isListening else { return }
-                if let result {
-                    self.partialTranscript = result.bestTranscription.formattedString
-                    self.resetSilenceTimer()
-                    if result.isFinal {
-                        self.finishListening(send: true)
-                    }
-                }
-                if error != nil {
-                    // Finish with whatever we have (recognition can error out at
-                    // the natural end of an utterance).
-                    self.finishListening(send: !self.partialTranscript.isEmpty)
-                }
+                self?.handleRecognition(result: result, error: error, recognizer: recognizer)
             }
         }
+    }
 
-        resetSilenceTimer()
+    private func handleRecognition(
+        result: SFSpeechRecognitionResult?,
+        error: Error?,
+        recognizer: SFSpeechRecognizer
+    ) {
+        guard isListening else { return }
+        if let result {
+            let segment = result.bestTranscription.formattedString
+            partialTranscript = Self.join(accumulated, segment)
+            resetSilenceTimer()
+            if result.isFinal {
+                // The server endpointed a segment (a pause). Keep it and continue
+                // listening for the rest of the utterance — OUR trailing-silence
+                // timer, not the server's per-segment endpointing, ends the turn.
+                accumulated = Self.join(accumulated, segment)
+                partialTranscript = accumulated
+                startRecognitionSegment(recognizer: recognizer)
+            }
+        }
+        // Recognition errors are routine at a segment boundary; ignore them and let
+        // the trailing-silence timer decide when the whole utterance is finished.
+    }
+
+    /// Joins two transcript fragments with a single space, ignoring empties.
+    private static func join(_ a: String, _ b: String) -> String {
+        let left = a.trimmingCharacters(in: .whitespacesAndNewlines)
+        let right = b.trimmingCharacters(in: .whitespacesAndNewlines)
+        if left.isEmpty { return right }
+        if right.isEmpty { return left }
+        return left + " " + right
     }
 
     /// (Re)arms the trailing-silence auto-stop. Because the class is
