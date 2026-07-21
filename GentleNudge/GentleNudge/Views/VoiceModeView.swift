@@ -22,6 +22,12 @@ import SwiftData
 /// 5. When speech finishes → automatically start listening again. Loop until the
 ///    user ends the session.
 ///
+/// ## Audio session (iOS)
+/// The whole loop runs on ONE `.playAndRecord` configuration owned by
+/// `VoiceAudioSession`: the first listen activates it, listen ↔ speak handoffs
+/// never touch it (reconfiguring between phases used to break the next turn's
+/// capture), and `end()` releases it exactly once on dismiss.
+///
 /// ## Who owns TTS / re-listen (no double-speak)
 /// While presented, this view TAKES OVER `coordinator.onAssistantReply` (saving
 /// whatever `ChatView` had wired) so the reply is spoken exactly once, here, and
@@ -97,6 +103,7 @@ struct VoiceModeView: View {
         .onChange(of: synthesizer.isSpeaking) { _, speaking in speakingChanged(speaking) }
         .onChange(of: speech.isListening) { _, listening in listeningChanged(listening) }
         .onChange(of: speech.authorizationDenied) { _, denied in if denied { blockPermission() } }
+        .onChange(of: speech.isAvailable) { _, available in if !available { blockUnavailable() } }
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 620)
         #endif
@@ -284,9 +291,10 @@ struct VoiceModeView: View {
         startListening()
     }
 
-    /// Full teardown: stop looping, kill the mic + TTS, and restore the reply
-    /// handler `ChatView` had. Idempotent — runs from both the End button and
-    /// `onDisappear`, so any dismissal path leaves nothing running.
+    /// Full teardown: stop looping, kill the mic + TTS, release the shared voice
+    /// audio session, and restore the reply handler `ChatView` had. Idempotent —
+    /// runs from both the End button and `onDisappear`, so any dismissal path
+    /// leaves nothing running.
     private func end() {
         guard started else { return }
         sessionActive = false
@@ -296,6 +304,11 @@ struct VoiceModeView: View {
             coordinator.onAssistantReply = savedReplyHandler
             tookOverReply = false
         }
+        // Release the one shared `.playAndRecord` session LAST, after both the
+        // recognizer and the synthesizer are quiet. This view is the session's
+        // owner: `SpeechService` activates it lazily on the first listen and
+        // deliberately never deactivates it between turns (see VoiceAudioSession).
+        VoiceAudioSession.shared.endVoiceSession()
         started = false
     }
 
@@ -379,6 +392,17 @@ struct VoiceModeView: View {
         sessionActive = false
         speech.cancel()
         phase = .blocked("Enable Microphone and Speech Recognition for GentleNudge in Settings to use voice.")
+    }
+
+    /// The recognizer reported it can't work right now (server recognition needs
+    /// network / Siri services, or audio capture repeatedly failed to start).
+    /// Without this bridge a failed `speech.start()` would leave the view in a
+    /// fake "Listening…" state with the mic dead.
+    private func blockUnavailable() {
+        guard sessionActive else { return }
+        sessionActive = false
+        speech.cancel()
+        phase = .blocked("Speech recognition isn't available right now. Check your internet connection, then reopen voice mode.")
     }
 
     private func resumeAfterError() {

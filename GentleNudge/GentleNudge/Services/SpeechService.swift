@@ -3,81 +3,131 @@ import Observation
 import Speech
 import AVFoundation
 
-/// Speech-to-text controller for the chat assistant's mic button. Owns an
-/// `SFSpeechRecognizer` (on-device when supported) fed by an `AVAudioEngine` tap.
+/// Speech-to-text controller for the hands-free voice mode. Owns an
+/// `SFSpeechRecognizer` fed by an `AVAudioEngine` mic tap.
 ///
-/// Lifecycle: `start()` requests authorization, configures audio, installs the
-/// tap, and publishes a live `partialTranscript` (bound to the chat draft) plus
-/// `isListening`. `stop()` finishes and yields the final transcript through
-/// `onFinalTranscript` (the auto-send path); `cancel()` tears down without
-/// sending. A short trailing-silence timer auto-stops so the user rarely has to
-/// tap twice.
+/// ## Design — why it looks the way it does
 ///
-/// All published state is mutated on the main actor; audio/recognition callbacks
-/// hop back here. Teardown is idempotent and always removes the tap and stops the
-/// engine, so the engine is never left running.
+/// **One stable tap per turn.** `start()` builds a FRESH `AVAudioEngine`,
+/// installs the mic tap once, and leaves that tap untouched until the turn
+/// ends. The tap appends into a lock-guarded `RecognitionRequestSink` rather
+/// than directly into a specific request, so when the server finalizes its
+/// stream mid-utterance we swap in a fresh request with a pointer swap — the
+/// tap is never removed/reinstalled while the user is talking. (The previous
+/// design re-pointed the tap on every server `isFinal`; that remove/reinstall
+/// raced the audio thread and dropped words mid-sentence.)
+///
+/// **We decide end-of-turn, not the server.** Apple's server "finalizes" its
+/// recognition stream whenever it hears a pause (and at its ~1-minute cap).
+/// That is NOT the end of the user's turn: on `isFinal` we fold the finalized
+/// text into `accumulated` and immediately open a fresh recognition stream
+/// against the still-running tap. The turn ends only when OUR trailing-silence
+/// timer fires (no new words for `trailingSilence` seconds), the user taps
+/// stop, or recognition genuinely fails.
+///
+/// **The audio session is never touched mid-session.** `VoiceAudioSession`
+/// owns one `.playAndRecord` configuration for the entire voice session, and
+/// `teardown()` deliberately does NOT deactivate or reconfigure it — doing so
+/// between the listen and speak phases is what previously left the input path
+/// stale so the second turn captured nothing. `VoiceModeView` releases the
+/// session once, on dismiss.
+///
+/// **A fresh engine per turn.** After TTS plays (possibly changing the audio
+/// route), a reused engine's input node can hold a stale hardware format and
+/// deliver silence. Rebuilding the engine each turn re-reads the CURRENT input
+/// format, so the turn after a spoken reply always captures.
+///
+/// All published state is mutated on the main actor. Teardown is idempotent,
+/// and a `generation` counter makes every recognition callback self-identifying
+/// so a stale stream can never corrupt the current turn.
 @MainActor
 @Observable
 final class SpeechService {
 
     // MARK: Published UI state
 
-    /// True while the engine is capturing and the recognizer is active.
+    /// True while the engine is capturing and recognition is active.
     private(set) var isListening = false
 
-    /// The recognizer's live best guess for the current utterance. Bound to the
-    /// chat input field while listening.
+    /// The live best guess for the current utterance: everything the server has
+    /// already finalized this turn plus the in-flight stream's partial text.
     private(set) var partialTranscript = ""
 
-    /// Whether speech recognition is usable at all on this device/locale. When
-    /// false the mic button is disabled with an explanatory tooltip.
+    /// Whether speech recognition is usable right now. Starts optimistic (the
+    /// recognizer exists), then tracks `SFSpeechRecognizerDelegate` availability
+    /// (server recognition needs network) and flips false if audio capture
+    /// persistently fails to start. `VoiceModeView` observes this.
     private(set) var isAvailable: Bool
 
     /// Flips true when the user has denied microphone or speech-recognition
-    /// permission, so the UI can point them at System Settings. `ChatView`
-    /// observes this to raise a one-time alert.
+    /// permission, so the UI can point them at System Settings.
     private(set) var authorizationDenied = false
 
     // MARK: Callbacks
 
-    /// Fires once with the trimmed final transcript when listening finishes with
-    /// non-empty text (manual stop, final recognition result, or auto-stop on
-    /// silence). `ChatView` routes this straight into the existing send path.
+    /// Fires once with the trimmed final transcript when a turn finishes with
+    /// non-empty text (manual stop, trailing-silence auto-stop, or a mid-turn
+    /// failure after words were already captured). The voice loop routes this
+    /// straight into the send path.
     @ObservationIgnored var onFinalTranscript: ((String) -> Void)?
 
-    // MARK: Engine internals (not observed)
+    // MARK: Internals (not observed)
 
     @ObservationIgnored private let recognizer: SFSpeechRecognizer?
-    @ObservationIgnored private let audioEngine = AVAudioEngine()
-    @ObservationIgnored private var request: SFSpeechAudioBufferRecognitionRequest?
+    @ObservationIgnored private var availabilityProxy: AvailabilityProxy?
+    /// Rebuilt fresh for every turn — see the class docs.
+    @ObservationIgnored private var engine: AVAudioEngine?
+    /// Thread-safe indirection between the mic tap and the current request, so
+    /// swapping requests never touches the tap.
+    @ObservationIgnored private let sink = RecognitionRequestSink()
     @ObservationIgnored private var task: SFSpeechRecognitionTask?
-    /// Finalized segments of the current utterance. The server "finalizes" a
-    /// segment at every speech pause; we fold each one in here and keep listening,
-    /// so a mid-sentence pause never drops the earlier words. `partialTranscript`
-    /// is always `accumulated` + the live segment.
+    /// Text the server has already finalized this turn (it endpoints at pauses;
+    /// we keep listening straight through them).
     @ObservationIgnored private var accumulated = ""
-    /// Debounced trailing-silence auto-stop. Reset on every partial result.
+    /// Partial text of the current in-flight recognition stream.
+    @ObservationIgnored private var liveText = ""
+    /// Identifies the current recognition stream. Bumped on every stream swap
+    /// AND on teardown, so late callbacks from a dead stream are ignored wholesale.
+    @ObservationIgnored private var generation = 0
+    /// The trailing-silence auto-stop, re-armed whenever NEW words arrive.
     @ObservationIgnored private var silenceTask: Task<Void, Never>?
+    @ObservationIgnored private var configChangeObserver: (any NSObjectProtocol)?
 
-    /// Seconds of no new recognition output before we auto-finish the utterance.
-    /// Generous enough to tolerate natural mid-sentence pauses.
-    private let silenceTimeout: TimeInterval = 2.0
+    /// Seconds of no NEW transcription text before the turn auto-finishes.
+    /// Generous enough for natural mid-sentence/multi-sentence pauses; the user
+    /// can always tap the orb to send immediately.
+    private let trailingSilence: TimeInterval = 2.5
+
+    /// How long to wait for the FIRST words before quietly recycling the turn
+    /// (nothing is sent; the voice loop re-arms listening). This also keeps the
+    /// server stream fresh while the user is silent, so a long wait can never
+    /// run into the server's per-stream time cap.
+    private let initialSpeechWindow: TimeInterval = 10.0
 
     init() {
         // Prefer the user's locale; fall back to the recognizer's default.
-        recognizer = SFSpeechRecognizer(locale: Locale.current) ?? SFSpeechRecognizer()
-        isAvailable = recognizer?.isAvailable ?? false
+        let recognizer = SFSpeechRecognizer(locale: Locale.current) ?? SFSpeechRecognizer()
+        self.recognizer = recognizer
+        // Optimistic: server availability often reports false for a beat right
+        // after init. `start()` re-checks, and the delegate keeps this honest.
+        isAvailable = recognizer != nil
+        if let recognizer {
+            let proxy = AvailabilityProxy()
+            proxy.owner = self
+            availabilityProxy = proxy
+            recognizer.delegate = proxy
+        }
     }
 
     // MARK: Public control
 
-    /// Begins listening: requests authorization, then starts audio capture and
-    /// recognition. No-op if already listening. Degrades gracefully — sets
-    /// `authorizationDenied` (never crashes) if permission is refused or the
-    /// recognizer is unavailable.
+    /// Begins a listen turn: requests authorization, activates the shared voice
+    /// audio session (idempotent), and starts capture + recognition. No-op if
+    /// already listening. Degrades gracefully — sets `authorizationDenied` or
+    /// clears `isAvailable` (never crashes) so the UI can react.
     func start() {
         guard !isListening else { return }
-        guard let recognizer, recognizer.isAvailable else {
+        guard let recognizer else {
             isAvailable = false
             return
         }
@@ -85,116 +135,167 @@ final class SpeechService {
             guard let self else { return }
             let speechOK = await Self.requestSpeechAuthorization()
             let micOK = await Self.requestMicPermission()
+            guard !self.isListening else { return }
             guard speechOK, micOK else {
                 self.authorizationDenied = true
                 return
             }
             self.authorizationDenied = false
+            guard recognizer.isAvailable else {
+                // Server recognition needs network/Siri services. Surface this
+                // so the UI never sits in a fake "Listening…" state.
+                self.isAvailable = false
+                return
+            }
+            self.isAvailable = true
             do {
                 try self.beginListening(recognizer: recognizer)
             } catch {
-                // Any audio/session failure: tear down cleanly, stay silent.
                 self.teardown()
+                // Session activation / engine start can fail transiently right
+                // after a route change; retry once after a beat before surfacing.
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !self.isListening else { return }
+                do {
+                    try self.beginListening(recognizer: recognizer)
+                } catch {
+                    self.teardown()
+                    self.isAvailable = false
+                }
             }
         }
     }
 
-    /// Finishes the current utterance and sends whatever was transcribed.
+    /// Finishes the current turn immediately and sends whatever was transcribed.
     func stop() {
         finishListening(send: true)
     }
 
     /// Aborts listening without sending. Clears the partial so a stale phrase
-    /// can't leak into the draft.
+    /// can't leak into the next turn. Does NOT release the shared audio session
+    /// (see `VoiceAudioSession`) — the voice-mode UI does that on dismiss.
     func cancel() {
         teardown()
         partialTranscript = ""
     }
 
-    // MARK: Listening
+    // MARK: Turn setup
 
     private func beginListening(recognizer: SFSpeechRecognizer) throws {
-        #if os(iOS)
-        // Record + duck others; route to speaker + Bluetooth (CarPlay / car audio).
-        // Deactivated in teardown so the synthesizer can take the session for
-        // playback afterward. `.default` mode (not `.measurement`, which minimizes
-        // input signal processing and can starve recognition).
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .default,
-            options: [.duckOthers, .defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
-        )
-        try session.setActive(true, options: .notifyOthersOnDeactivation)
-        #endif
+        // ONE session configuration for the whole voice session (record + TTS
+        // playback). Idempotent; only the first turn does any work.
+        try VoiceAudioSession.shared.beginVoiceSession()
 
         accumulated = ""
+        liveText = ""
         partialTranscript = ""
-        isListening = true
 
-        // Install the tap + first recognition segment, then run the engine. The
-        // engine stays running across segment restarts (only the request/task and
-        // tap are swapped), so we keep capturing straight through pauses.
-        startRecognitionSegment(recognizer: recognizer)
-        audioEngine.prepare()
-        try audioEngine.start()
-
-        resetSilenceTimer()
-    }
-
-    /// Starts (or restarts) a single recognition segment against a fresh request,
-    /// re-pointing the mic tap at it. Called at the start of listening and again
-    /// each time the server finalizes a segment at a pause — the reinstall happens
-    /// during that pause, so no spoken words are lost.
-    private func startRecognitionSegment(recognizer: SFSpeechRecognizer) {
-        task?.cancel()
-        task = nil
-        request?.endAudio()
-
-        let audioRequest = SFSpeechAudioBufferRecognitionRequest()
-        audioRequest.shouldReportPartialResults = true
-        // Server recognition (the default). Forcing `requiresOnDeviceRecognition`
-        // silently produced nothing when the per-locale model wasn't installed.
-        request = audioRequest
-
-        let inputNode = audioEngine.inputNode
-        inputNode.removeTap(onBus: 0)
-        let format = inputNode.outputFormat(forBus: 0)
-        // Capture `audioRequest` strongly so the off-main audio thread never
-        // touches `self`; appending buffers here is the documented pattern.
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-            audioRequest.append(buffer)
+        // Fresh engine per turn — see the class docs.
+        let engine = AVAudioEngine()
+        self.engine = engine
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        // A dead/misconfigured input reports 0 Hz / 0 channels; tapping it would
+        // either throw or capture silence. Fail fast so the caller can retry.
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw StartError.noUsableInput
         }
 
-        task = recognizer.recognitionTask(with: audioRequest) { [weak self] result, error in
-            // Recognition callbacks arrive off the main actor; hop back.
+        // The tap runs on a realtime audio thread: it must never touch `self`.
+        // It appends through the sink, so mid-turn request swaps are pointer
+        // swaps and the tap itself is installed exactly once per turn.
+        let sink = self.sink
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            sink.append(buffer)
+        }
+
+        startRecognitionStream(recognizer: recognizer)
+
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            throw error
+        }
+
+        isListening = true
+        observeConfigurationChanges(of: engine)
+        armSilenceTimer(after: initialSpeechWindow)
+    }
+
+    /// Opens a recognition stream against the already-running tap. Called once
+    /// at turn start and again whenever the server finalizes its stream mid-turn.
+    private func startRecognitionStream(recognizer: SFSpeechRecognizer) {
+        generation += 1
+        let gen = generation
+
+        task?.cancel() // no-op when the previous stream already finished
+        task = nil
+
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.taskHint = .dictation
+        request.addsPunctuation = true
+        // Server recognition. Forcing on-device silently produced nothing when
+        // the per-locale model wasn't installed (see git history).
+        request.requiresOnDeviceRecognition = false
+
+        // From this instant the (untouched) tap feeds the new stream.
+        sink.set(request)
+
+        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            // Callbacks arrive off the main actor; hop back, tagged with the
+            // stream generation so a stale stream can't touch current state.
             Task { @MainActor [weak self] in
-                self?.handleRecognition(result: result, error: error, recognizer: recognizer)
+                self?.handleRecognition(gen: gen, result: result, error: error, recognizer: recognizer)
             }
         }
     }
 
+    // MARK: Recognition results
+
     private func handleRecognition(
+        gen: Int,
         result: SFSpeechRecognitionResult?,
         error: Error?,
         recognizer: SFSpeechRecognizer
     ) {
-        guard isListening else { return }
+        guard isListening, gen == generation else { return }
+
         if let result {
-            let segment = result.bestTranscription.formattedString
-            partialTranscript = Self.join(accumulated, segment)
-            resetSilenceTimer()
+            let text = result.bestTranscription.formattedString
+            if text != liveText {
+                liveText = text
+                partialTranscript = Self.join(accumulated, text)
+                // New words arrived → the user is talking; push the deadline out.
+                armSilenceTimer(after: trailingSilence)
+            }
             if result.isFinal {
-                // The server endpointed a segment (a pause). Keep it and continue
-                // listening for the rest of the utterance — OUR trailing-silence
-                // timer, not the server's per-segment endpointing, ends the turn.
-                accumulated = Self.join(accumulated, segment)
+                // The SERVER ended its stream (it endpoints at pauses and at its
+                // ~1-minute cap). That is not the end of the user's turn: bank
+                // the finalized text and immediately open a fresh stream against
+                // the still-running tap. Only OUR silence timer ends the turn.
+                accumulated = Self.join(accumulated, text)
+                liveText = ""
                 partialTranscript = accumulated
-                startRecognitionSegment(recognizer: recognizer)
+                startRecognitionStream(recognizer: recognizer)
+            }
+            return
+        }
+
+        if error != nil {
+            // A genuine in-stream failure (network drop, service error). Our own
+            // teardown/swaps can't reach here — they bump `generation` first.
+            // If the user already said something, deliver it rather than dropping
+            // their words; otherwise tear down quietly and let the voice loop
+            // re-arm listening.
+            if partialTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                teardown()
+            } else {
+                finishListening(send: true)
             }
         }
-        // Recognition errors are routine at a segment boundary; ignore them and let
-        // the trailing-silence timer decide when the whole utterance is finished.
     }
 
     /// Joins two transcript fragments with a single space, ignoring empties.
@@ -206,12 +307,13 @@ final class SpeechService {
         return left + " " + right
     }
 
-    /// (Re)arms the trailing-silence auto-stop. Because the class is
-    /// main-actor-isolated, the `Task` body runs on the main actor.
-    private func resetSilenceTimer() {
+    // MARK: End-of-turn
+
+    /// (Re)arms the auto-finish timer. Because the class is main-actor-isolated,
+    /// the `Task` body runs on the main actor.
+    private func armSilenceTimer(after timeout: TimeInterval) {
         silenceTask?.cancel()
         silenceTask = Task { [weak self] in
-            let timeout = self?.silenceTimeout ?? 1.6
             try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
             guard !Task.isCancelled else { return }
             self?.finishListening(send: true)
@@ -219,7 +321,8 @@ final class SpeechService {
     }
 
     /// Idempotent finish: snapshots the transcript, tears down, then (optionally)
-    /// hands the final text to the auto-send callback.
+    /// hands the final text to the auto-send callback. An empty transcript is
+    /// never sent — the voice loop just re-arms listening.
     private func finishListening(send: Bool) {
         guard isListening else { return }
         let finalText = partialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -229,29 +332,78 @@ final class SpeechService {
         }
     }
 
-    /// Full, idempotent teardown: cancels the silence timer, stops the engine,
-    /// removes the tap, ends the request, cancels the task, and (iOS) deactivates
-    /// the audio session. Safe to call multiple times.
+    /// Full, idempotent teardown of the TURN: cancels the timer and recognition,
+    /// detaches the sink, removes the tap, and discards the engine. Deliberately
+    /// does NOT deactivate or reconfigure the audio session — `VoiceAudioSession`
+    /// keeps the one `.playAndRecord` configuration alive across listen → speak →
+    /// listen; flipping the session between turns is exactly what previously
+    /// broke the second turn's capture.
     private func teardown() {
+        generation += 1 // orphan any in-flight recognition callbacks
+
         silenceTask?.cancel()
         silenceTask = nil
 
-        if audioEngine.isRunning {
-            audioEngine.stop()
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configChangeObserver = nil
         }
-        audioEngine.inputNode.removeTap(onBus: 0)
 
-        request?.endAudio()
-        request = nil
+        // Stop feeding audio first (the sink drops buffers once detached), then
+        // dismantle the recognition task and the engine.
+        sink.endAudio()
         task?.cancel()
         task = nil
 
-        isListening = false
+        if let engine {
+            engine.inputNode.removeTap(onBus: 0)
+            if engine.isRunning {
+                engine.stop()
+            }
+        }
+        engine = nil
 
-        #if os(iOS)
-        // Release the record session so the synthesizer (and other apps) get it back.
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        #endif
+        isListening = false
+    }
+
+    // MARK: Route/hardware changes
+
+    /// The engine posts this when the audio hardware or route changes underneath
+    /// it mid-turn (e.g. Bluetooth connects); its rendering stops and the tap
+    /// format may no longer match the hardware. Finish the turn with whatever
+    /// was heard — the voice loop re-arms, and the next turn's fresh engine
+    /// picks up the new route's format.
+    private func observeConfigurationChanges(of engine: AVAudioEngine) {
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.finishListening(send: true)
+            }
+        }
+    }
+
+    // MARK: Errors
+
+    private enum StartError: Error {
+        /// The input node reported an unusable hardware format (0 Hz / 0 ch).
+        case noUsableInput
+    }
+
+    // MARK: Availability delegate
+
+    /// Bridges `SFSpeechRecognizerDelegate` (an NSObject protocol) back to the
+    /// observable owner so `isAvailable` tracks server availability live.
+    private final class AvailabilityProxy: NSObject, SFSpeechRecognizerDelegate {
+        weak var owner: SpeechService?
+
+        func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
+            Task { @MainActor [weak owner] in
+                owner?.isAvailable = available
+            }
+        }
     }
 
     // MARK: Authorization
@@ -274,5 +426,45 @@ final class SpeechService {
         #else
         return await AVCaptureDevice.requestAccess(for: .audio)
         #endif
+    }
+}
+
+/// Lock-guarded indirection between the realtime mic tap and whichever
+/// `SFSpeechAudioBufferRecognitionRequest` is currently live. The tap appends
+/// through this so replacing the request (when the server finalizes a stream
+/// mid-utterance) is a pointer swap — the tap itself is never removed and
+/// reinstalled while audio is flowing, which is what used to drop words.
+///
+/// Deliberately a top-level (file-private) class: nesting it inside the
+/// main-actor `SpeechService` would infer main-actor isolation, and `append`
+/// must be callable from the audio thread.
+private final class RecognitionRequestSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+
+    /// Makes `new` the request that subsequent tap buffers feed.
+    func set(_ new: SFSpeechAudioBufferRecognitionRequest?) {
+        lock.lock()
+        request = new
+        lock.unlock()
+    }
+
+    /// Called from the realtime audio thread. Appends outside the lock so the
+    /// audio thread never blocks on recognition-internal work.
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        let current = request
+        lock.unlock()
+        current?.append(buffer)
+    }
+
+    /// Detaches and ends the current request; buffers tapped after this are
+    /// dropped harmlessly (covers the window before the tap is removed).
+    func endAudio() {
+        lock.lock()
+        let current = request
+        request = nil
+        lock.unlock()
+        current?.endAudio()
     }
 }

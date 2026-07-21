@@ -177,19 +177,28 @@ final class SpeechSynthesizer {
 
     // MARK: Audio session (iOS only)
 
-    /// Takes the session for spoken playback (the STT recorder deactivates it when
-    /// dictation ends). Ducks other audio rather than interrupting it. No-op on macOS.
+    /// Takes the session for spoken playback — but ONLY outside a hands-free
+    /// voice session. During voice mode, `VoiceAudioSession` holds one stable
+    /// `.playAndRecord` configuration for the whole record → speak → record
+    /// loop; reconfiguring it to `.playback` here (as this used to do) tore up
+    /// the input path mid-session and made the next listen turn capture
+    /// nothing. Standalone (typed chat) playback ducks other audio rather than
+    /// interrupting it. No-op on macOS.
     private func configurePlaybackSession() {
         #if os(iOS)
+        guard !VoiceAudioSession.shared.isVoiceSessionActive else { return }
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? session.setActive(true)
         #endif
     }
 
-    /// Un-ducks other apps once we're done talking. No-op on macOS.
+    /// Un-ducks other apps once we're done talking — again ONLY outside a voice
+    /// session: mid-session the shared session must stay active so the next
+    /// listen turn's mic capture works. No-op on macOS.
     private func deactivatePlaybackSession() {
         #if os(iOS)
+        guard !VoiceAudioSession.shared.isVoiceSessionActive else { return }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         #endif
     }
