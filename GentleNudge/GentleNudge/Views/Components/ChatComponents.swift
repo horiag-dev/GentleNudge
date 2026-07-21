@@ -749,7 +749,6 @@ struct ChatErrorBanner: View {
 // MARK: - Empty / no-key states
 
 struct ChatEmptyState: View {
-    let examples: [String]
     /// When there's meaningful cleanup potential, the number of clearable items;
     /// nil hides the proactive "Clean up" suggestion.
     var cleanupCount: Int?
@@ -792,21 +791,6 @@ struct ChatEmptyState: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
                         )
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                ForEach(examples, id: \.self) { example in
-                    Button {
-                        onPick(example)
-                    } label: {
-                        Text(example)
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(AppColors.secondaryBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }

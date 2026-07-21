@@ -116,21 +116,25 @@ final class SpeechService {
         // Record + duck others; route to the speaker. Deactivated in teardown so
         // the synthesizer can take the session for playback afterward.
         let session = AVAudioSession.sharedInstance()
+        // `.default` mode (not `.measurement`, which minimizes input signal
+        // processing and can starve recognition). Route to speaker + Bluetooth
+        // so it works over CarPlay / car audio.
         try session.setCategory(
             .playAndRecord,
-            mode: .measurement,
-            options: [.duckOthers, .defaultToSpeaker, .allowBluetooth]
+            mode: .default,
+            options: [.duckOthers, .defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
         )
         try session.setActive(true, options: .notifyOthersOnDeactivation)
         #endif
 
         let audioRequest = SFSpeechAudioBufferRecognitionRequest()
         audioRequest.shouldReportPartialResults = true
-        // Prefer fully on-device recognition when the model is installed (privacy
-        // + offline); otherwise fall back to server recognition automatically.
-        if recognizer.supportsOnDeviceRecognition {
-            audioRequest.requiresOnDeviceRecognition = true
-        }
+        // Use server recognition (the default). Forcing `requiresOnDeviceRecognition`
+        // made recognition silently produce nothing: `supportsOnDeviceRecognition`
+        // can be true while the per-locale model isn't actually installed, so the
+        // task errors out with an empty transcript and the UI just sits on
+        // "Listening…". Server recognition is reliable whenever online. (A guarded
+        // on-device path for true offline use can be re-added later.)
         request = audioRequest
 
         let inputNode = audioEngine.inputNode

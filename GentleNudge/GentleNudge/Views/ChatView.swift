@@ -30,12 +30,6 @@ struct ChatView: View {
 
     private let bottomID = "chat-bottom-anchor"
 
-    private let examplePrompts = [
-        "Call the dentist next Tuesday",
-        "Pay rent monthly on the 1st",
-        "Read Atomic Habits, chapter 5"
-    ]
-
     /// Categories a reminder can actually be filed under (excludes the habits
     /// category). Send is gated on at least one existing (§2.7).
     private var availableCategories: [Category] {
@@ -121,9 +115,10 @@ struct ChatView: View {
                 showVoiceMode = true
             } label: {
                 Label("Voice", systemImage: "waveform")
+                    .font(.headline)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            .controlSize(.large)
             .disabled(!hasAPIKey)
             .help("Start a hands-free voice conversation")
             Button {
@@ -146,7 +141,7 @@ struct ChatView: View {
         if !hasAPIKey {
             ChatNoKeyState(onOpenSettings: openSettings)
         } else if coordinator.transcript.isEmpty && !coordinator.isRunning {
-            // Resting state: the hero + example prompts, kept near the top.
+            // Resting state: the hero + the proactive cleanup offer, kept near the top.
             emptyStateScroll
         } else {
             transcriptScroll
@@ -155,7 +150,7 @@ struct ChatView: View {
 
     private var emptyStateScroll: some View {
         ScrollView {
-            ChatEmptyState(examples: examplePrompts, cleanupCount: cleanupCount) { prompt in
+            ChatEmptyState(cleanupCount: cleanupCount) { prompt in
                 draft = prompt
                 inputFocused = true
             }
