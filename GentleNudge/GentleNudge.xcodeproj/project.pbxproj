@@ -60,6 +60,7 @@
 				Services/ChatTools.swift,
 				Services/ClaudeService.swift,
 				Services/MorningBriefingService.swift,
+				Services/OpenAITTSClient.swift,
 				Services/ReminderRepository.swift,
 				Services/SpeechService.swift,
 				Services/SpeechSynthesizer.swift,

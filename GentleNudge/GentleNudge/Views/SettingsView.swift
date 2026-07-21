@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var showingGenerateConfirmation = false
     @State private var apiKeyInput = ""
     @State private var showingAPIKeyField = false
+    @State private var openAIKeyInput = ""
+    @State private var showingOpenAIKeyField = false
     @State private var showingExporter = false
     @State private var exportDocument: BackupDocument?
     @State private var backupList: [(date: Date, url: URL, size: Int64)] = []
@@ -39,6 +41,8 @@ struct SettingsView: View {
     @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
     @AppStorage(Constants.DefaultsKeys.chatModel) private var chatModel = Constants.defaultChatModel.rawValue
     @AppStorage(Constants.DefaultsKeys.reasoningEffort) private var reasoningEffort = Constants.defaultReasoningEffort.rawValue
+    @AppStorage(Constants.DefaultsKeys.ttsVoice) private var ttsVoice = Constants.defaultTTSVoice.rawValue
+    @AppStorage(Constants.DefaultsKeys.neuralVoiceEnabled) private var neuralVoiceEnabled = true
     @State private var showingDebugInfo = false
     @State private var debugInfoMessage = ""
     @State private var isPullingFromiCloud = false
@@ -239,6 +243,71 @@ struct SettingsView: View {
                     Text("Assistant")
                 } footer: {
                     Text("The assistant uses your own Claude API key (stored securely in the Keychain). Higher reasoning effort improves answers but uses more tokens.")
+                }
+
+                // Assistant Voice (neural TTS)
+                Section {
+                    Toggle(isOn: $neuralVoiceEnabled) {
+                        Label("Neural Voice", systemImage: "waveform")
+                    }
+
+                    Picker(selection: $ttsVoice) {
+                        ForEach(TTSVoice.allCases) { voice in
+                            Text(voice.displayName).tag(voice.rawValue)
+                        }
+                    } label: {
+                        Label("Voice", systemImage: "person.wave.2")
+                    }
+                    .disabled(!neuralVoiceEnabled)
+
+                    HStack {
+                        Text("OpenAI Key")
+                        Spacer()
+                        Text(Constants.isOpenAIKeyConfigured ? "Configured" : "Not configured")
+                            .foregroundStyle(Constants.isOpenAIKeyConfigured ? .green : .secondary)
+                    }
+
+                    if showingOpenAIKeyField {
+                        SecureField("Enter OpenAI API Key", text: $openAIKeyInput)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+
+                        Button {
+                            if !openAIKeyInput.isEmpty {
+                                Constants.openAIAPIKey = openAIKeyInput
+                                openAIKeyInput = ""
+                                showingOpenAIKeyField = false
+                                HapticManager.notification(.success)
+                            }
+                        } label: {
+                            Label("Save OpenAI Key", systemImage: "checkmark.circle.fill")
+                        }
+                        .disabled(openAIKeyInput.isEmpty)
+
+                        Button(role: .cancel) {
+                            openAIKeyInput = ""
+                            showingOpenAIKeyField = false
+                        } label: {
+                            Text("Cancel")
+                        }
+                    } else {
+                        Button {
+                            showingOpenAIKeyField = true
+                        } label: {
+                            Label(Constants.isOpenAIKeyConfigured ? "Update OpenAI Key" : "Enter OpenAI Key", systemImage: "key.fill")
+                        }
+                    }
+
+                    Link(destination: URL(string: "https://platform.openai.com/api-keys")!) {
+                        Label("Get OpenAI Key", systemImage: "arrow.up.right.square")
+                    }
+                } header: {
+                    Text("Assistant Voice")
+                } footer: {
+                    Text("The assistant speaks replies with OpenAI's neural voice (gpt-4o-mini-tts). The OpenAI key is used only for the spoken voice and is stored in your Keychain. Get one at platform.openai.com/api-keys. Without a key — or with Neural Voice off — it falls back to the built-in system voice.")
                 }
 
                 // Statistics

@@ -33,6 +33,33 @@ enum Constants {
 
     static let claudeAPIURL = "https://api.anthropic.com/v1/messages"
 
+    // MARK: - OpenAI TTS
+    // A separate OpenAI key, used ONLY for the assistant's spoken voice (neural
+    // text-to-speech). Stored in the Keychain, mirroring the Claude key above.
+    private static let openAIAPIKeyKeychainAccount = "com.horiag.GentleNudge.openAIAPIKey"
+
+    /// The user's OpenAI API key. Reads/writes the Keychain; empty when unset.
+    static var openAIAPIKey: String {
+        get { KeychainHelper.get(openAIAPIKeyKeychainAccount) ?? "" }
+        set { KeychainHelper.set(newValue, for: openAIAPIKeyKeychainAccount) }
+    }
+
+    /// True once an OpenAI key has been stored — gates neural TTS. Without it the
+    /// assistant falls back to Apple's on-device `AVSpeechSynthesizer`.
+    static var isOpenAIKeyConfigured: Bool { !openAIAPIKey.isEmpty }
+
+    static let openAISpeechURL = "https://api.openai.com/v1/audio/speech"
+
+    /// OpenAI's neural TTS model used for spoken replies.
+    static let openAITTSModel = "gpt-4o-mini-tts"
+
+    /// Default tone/instructions for the neural voice — a warm, natural delivery.
+    static let openAITTSInstructions =
+        "Speak in a warm, natural, conversational tone, like a friendly personal assistant."
+
+    /// Default neural voice when the user hasn't picked one.
+    static let defaultTTSVoice = TTSVoice.coral
+
     /// Model for the existing AI enhancement (reminder polish) feature.
     /// Was `claude-sonnet-4-20250514`, which was retired on 2026-06-15; replaced
     /// with its official successor, `claude-sonnet-5`.
@@ -78,6 +105,13 @@ enum Constants {
         /// Whether the assistant reads its replies aloud (voice output). Default
         /// on; toggled by the speaker/mute control in the chat header.
         static let voiceRepliesEnabled = "voiceRepliesEnabled"
+
+        /// Selected neural TTS voice (raw value of `TTSVoice`). Default `coral`.
+        static let ttsVoice = "ttsVoice"
+
+        /// Whether to use OpenAI's neural voice (when a key is configured).
+        /// Default on; turning it off forces the built-in Apple system voice.
+        static let neuralVoiceEnabled = "neuralVoiceEnabled"
     }
 
     // MARK: - UI
@@ -120,6 +154,17 @@ enum ChatModel: String, CaseIterable, Identifiable {
         case .sonnet: return "Claude Sonnet 5"
         }
     }
+}
+
+/// Selectable neural voices for `gpt-4o-mini-tts`. Raw value is the OpenAI
+/// `voice` parameter sent to the speech endpoint.
+enum TTSVoice: String, CaseIterable, Identifiable {
+    case alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse
+
+    var id: String { rawValue }
+
+    /// Capitalized name for the picker (e.g. "Coral").
+    var displayName: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
 }
 
 /// Reasoning effort for the chat assistant. Raw value maps to the API's
