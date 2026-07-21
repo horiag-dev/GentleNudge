@@ -109,18 +109,6 @@ struct ChatView: View {
             }
             .buttonStyle(.borderless)
             .help(synthesizer.voiceRepliesEnabled ? "Assistant reads replies aloud (tap to mute)" : "Spoken replies muted (tap to unmute)")
-            // Dedicated hands-free Voice mode — its own prominent entry point, not
-            // a button on the text field.
-            Button {
-                showVoiceMode = true
-            } label: {
-                Label("Voice", systemImage: "waveform")
-                    .font(.headline)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(!hasAPIKey)
-            .help("Start a hands-free voice conversation")
             Button {
                 startNewChat()
             } label: {
@@ -269,6 +257,22 @@ struct ChatView: View {
     /// scroll-dismiss) — no floating "Done" pill.
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: Constants.Spacing.xs) {
+            // Hands-free Voice mode launcher, in the bottom bar where the thumb
+            // already is (much easier to hit while driving than the header).
+            Button {
+                showVoiceMode = true
+            } label: {
+                Image(systemName: "waveform")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(hasAPIKey ? Color.accentColor : Color.secondary)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasAPIKey)
+            .help("Start a hands-free voice conversation")
+
             TextField("Message the assistant…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
