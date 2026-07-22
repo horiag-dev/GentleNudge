@@ -136,43 +136,6 @@ struct MacContentView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
 
-                // Assistant — flagship top-level destination (⌘⇧A)
-                Button {
-                    selectedSidebarItem = .chat
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .font(.title3)
-                            .foregroundStyle(Color.accentColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Assistant")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text("Add reminders by chatting")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(selectedSidebarItem == .chat
-                                ? Color.accentColor.opacity(0.18)
-                                : Color.accentColor.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(selectedSidebarItem == .chat ? Color.accentColor : .clear, lineWidth: 2)
-                    )
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut("a", modifiers: [.command, .shift])
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-
                 // Smart Lists Grid
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                     SmartListCard(
@@ -276,10 +239,8 @@ struct MacContentView: View {
                 }
             }
         } detail: {
-            // MARK: Main Content
-            if selectedSidebarItem == .chat {
-                ChatView(onOpenSettings: { showingSettings = true })
-            } else {
+            // MARK: Main Content — reminders on the left, Assistant docked on the
+            // right and always open.
             HSplitView {
                 // Reminder List
                 VStack(spacing: 0) {
@@ -317,7 +278,10 @@ struct MacContentView: View {
                         .frame(minWidth: 320, idealWidth: 380, maxWidth: 420)
                         .transition(.move(edge: .trailing))
                 }
-            }
+
+                // Assistant — always-open, docked on the right (Mac).
+                ChatView(onOpenSettings: { showingSettings = true })
+                    .frame(minWidth: 320, idealWidth: 380, maxWidth: 520)
             }
         }
         .sheet(isPresented: $showingAddReminder) {
