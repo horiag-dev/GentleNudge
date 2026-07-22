@@ -257,8 +257,9 @@ struct ChatView: View {
     /// scroll-dismiss) — no floating "Done" pill.
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: Constants.Spacing.xs) {
+            #if os(iOS)
             // Hands-free Voice mode launcher, in the bottom bar where the thumb
-            // already is (much easier to hit while driving than the header).
+            // already is. iOS-only — on Mac the assistant is text chat.
             Button {
                 showVoiceMode = true
             } label: {
@@ -272,6 +273,7 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .disabled(!hasAPIKey)
             .help("Start a hands-free voice conversation")
+            #endif
 
             TextField("Message the assistant…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
