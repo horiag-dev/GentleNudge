@@ -53,9 +53,31 @@ enum Constants {
     /// OpenAI's neural TTS model used for spoken replies.
     static let openAITTSModel = "gpt-4o-mini-tts"
 
-    /// Default tone/instructions for the neural voice — a warm, natural delivery.
-    static let openAITTSInstructions =
-        "Speak in a warm, natural, conversational tone, like a friendly personal assistant."
+    /// Default delivery instructions for the neural voice. `gpt-4o-mini-tts`
+    /// follows rich stage directions, so this spells out affect, tone, pacing,
+    /// and pausing to get a warm, natural, un-robotic read of the assistant's
+    /// short reminder replies. Only the delivery changes — the user-selected
+    /// voice is still sent separately.
+    static let openAITTSInstructions = """
+        Voice affect: warm, friendly, and quietly upbeat — a kind personal \
+        assistant who genuinely enjoys helping.
+
+        Tone: conversational and natural, like talking with a good friend. \
+        Relaxed and encouraging, never formal, stiff, or robotic.
+
+        Pacing: calm and unhurried, at an easy conversational speed — never \
+        rushed, never dragging.
+
+        Pauses: breathe naturally. Take brief pauses at commas and between \
+        sentences, and a slightly longer beat between separate thoughts or \
+        list items.
+
+        Delivery: smooth and even, with light natural emphasis on the details \
+        that matter (task names, dates, and times). Vary the intonation the \
+        way a person would; avoid any monotone or sing-song patterns.
+
+        Pronunciation: clear and articulate, with a subtle smile in the voice.
+        """
 
     /// Default neural voice when the user hasn't picked one.
     static let defaultTTSVoice = TTSVoice.coral
