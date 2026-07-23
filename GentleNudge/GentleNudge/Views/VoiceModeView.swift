@@ -289,7 +289,21 @@ struct VoiceModeView: View {
 
         sessionActive = true
         startBreathing()
-        startListening()
+
+        // Defer the FIRST listen until the presentation transition has finished.
+        // `begin()` runs from `onAppear`, i.e. while the full-screen cover is
+        // still animating in, and `startListening()` → `speech.start()` ends up
+        // doing synchronous main-thread audio work (activating the shared
+        // `.playAndRecord` session and building the capture engine) heavy enough
+        // to hitch the animation — which looked like the app freezing "between
+        // screens". The view shows its "Getting ready…" phase for this beat.
+        // The audio pipeline is untouched: same calls, same order, same owner —
+        // only started after the cover has settled.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard sessionActive else { return }
+            startListening()
+        }
     }
 
     /// Full teardown: stop looping, kill the mic + TTS, release the shared voice

@@ -51,6 +51,14 @@ struct ChatView: View {
             header
             Divider()
             content
+        }
+        // The composer rides the bottom SAFE AREA edge instead of sitting as the
+        // stack's last element. Safe-area-inset content is repositioned from the
+        // resolved safe area on every layout pass, so when the keyboard raises
+        // the bottom safe area the bar reliably lands ABOVE it — including when
+        // focus is set programmatically on tab arrival, which used to leave the
+        // stack-pinned field hidden behind the auto-raised keyboard on iOS.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             inputArea
         }
         .background(AppColors.background)
@@ -285,13 +293,18 @@ struct ChatView: View {
 
     /// Raise the keyboard when arriving on the Assistant tab — but only when the
     /// user can actually type/send (a key AND at least one category; not the
-    /// no-key or empty-category states). Deferred a short async hop so the focus
-    /// set actually raises the keyboard on a tab switch. The user can still
-    /// dismiss it afterward (interactive scroll-dismiss); we don't re-assert it.
+    /// no-key or empty-category states). The focus set is deferred until well
+    /// after the `TabView` has finished swapping this tab's content in: focusing
+    /// while the swap is still settling (the old 50 ms hop) raised the keyboard
+    /// before keyboard avoidance was tracking the freshly-installed field, which
+    /// left the composer hidden behind the keyboard. Waiting out the transition
+    /// makes the programmatic focus behave like a manual tap. The user can still
+    /// dismiss the keyboard afterward (interactive scroll-dismiss); we don't
+    /// re-assert it.
     private func focusInputIfReady() {
         guard hasAPIKey, hasCategories else { return }
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(350))
             inputFocused = true
         }
     }

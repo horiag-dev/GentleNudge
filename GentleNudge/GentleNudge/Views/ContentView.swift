@@ -179,6 +179,12 @@ struct ContentView: View {
                     )
                 }
             } else if newPhase == .background {
+                // Safety net for the custom bar: if iOS tears the keyboard down
+                // during backgrounding without a `keyboardWillHide`, a stale
+                // `keyboardVisible == true` would leave the bar hidden forever.
+                // Reset here — if the keyboard restores on return, its
+                // `keyboardWillShow` re-fires and hides the bar again.
+                keyboardVisible = false
                 // Update scheduled notification when app goes to background.
                 // Use TOMORROW's data since the notification fires tomorrow morning.
                 // This pre-generates an AI-prioritized body inside a background-task
