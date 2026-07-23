@@ -62,6 +62,16 @@ struct SettingsView: View {
         case error
     }
 
+    /// "1.2.0 (2)" — the real marketing version + build number from the bundle
+    /// (which come from MARKETING_VERSION / CURRENT_PROJECT_VERSION at build
+    /// time), so this row always reflects the build actually installed.
+    static var appVersionText: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -362,8 +372,9 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.2.0")
+                        Text(Self.appVersionText)
                             .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
 
                     HStack {
