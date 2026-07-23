@@ -73,7 +73,6 @@ struct ChatView: View {
         .onAppear {
             refreshKeyState()
             wireConfirmationHooks()
-            wireVoice()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshKeyState() }
@@ -100,15 +99,6 @@ struct ChatView: View {
             Label("Assistant", systemImage: "sparkles")
                 .font(.headline)
             Spacer()
-            // TTS mute toggle: reads/persists `voiceRepliesEnabled`. Muting also
-            // stops any in-progress speech (handled in the synthesizer's setter).
-            Button {
-                synthesizer.voiceRepliesEnabled.toggle()
-            } label: {
-                Image(systemName: synthesizer.voiceRepliesEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-            }
-            .buttonStyle(.borderless)
-            .help(synthesizer.voiceRepliesEnabled ? "Assistant reads replies aloud (tap to mute)" : "Spoken replies muted (tap to unmute)")
             Button {
                 startNewChat()
             } label: {
@@ -336,16 +326,6 @@ struct ChatView: View {
 
     private func openSettings() {
         onOpenSettings?()
-    }
-
-    /// Wires spoken replies for the typed chat: when a turn ends normally, the
-    /// assistant's reply is read aloud. Idempotent — safe on every `onAppear`. The
-    /// hook never fires for tool status, notices, or errors. Voice mode temporarily
-    /// takes this hook over (and restores it) so a reply is spoken exactly once.
-    private func wireVoice() {
-        coordinator.onAssistantReply = { [synthesizer] reply in
-            synthesizer.speak(reply)
-        }
     }
 
     private func refreshKeyState() {
