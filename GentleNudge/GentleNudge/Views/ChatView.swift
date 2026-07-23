@@ -21,12 +21,9 @@ struct ChatView: View {
     @State private var confirmationPresenter = ConfirmationPresenter()
     @FocusState private var inputFocused: Bool
 
-    // Spoken replies (TTS) for the typed chat, plus the dedicated hands-free Voice
-    // mode. The synthesizer is shared with `VoiceModeView` so mute state and the
-    // OpenAI-vs-Apple routing are one and the same, and only one engine ever talks.
-    // Dictation now lives entirely in Voice mode (no inline mic).
-    @State private var synthesizer = SpeechSynthesizer()
-    @State private var showVoiceMode = false
+    // Voice is no longer launched from here: the hands-free Voice mode has its
+    // own top-level entry in the iOS bottom bar (see `ContentView`), which owns
+    // the shared `SpeechSynthesizer`. Typed chat itself never speaks.
 
     private let bottomID = "chat-bottom-anchor"
 
@@ -77,19 +74,6 @@ struct ChatView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshKeyState() }
         }
-        // Hands-free Voice mode: full-screen on iOS (the car use case), a large
-        // sheet on macOS. Shares the coordinator + synthesizer so the conversation
-        // continues and only one TTS engine ever speaks.
-        #if os(iOS)
-        .fullScreenCover(isPresented: $showVoiceMode) { voiceModeCover }
-        #else
-        .sheet(isPresented: $showVoiceMode) { voiceModeCover }
-        #endif
-    }
-
-    private var voiceModeCover: some View {
-        VoiceModeView(synthesizer: synthesizer, onOpenSettings: onOpenSettings)
-            .environment(coordinator)
     }
 
     // MARK: Header
@@ -247,24 +231,6 @@ struct ChatView: View {
     /// scroll-dismiss) — no floating "Done" pill.
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: Constants.Spacing.xs) {
-            #if os(iOS)
-            // Hands-free Voice mode launcher, in the bottom bar where the thumb
-            // already is. iOS-only — on Mac the assistant is text chat.
-            Button {
-                showVoiceMode = true
-            } label: {
-                Image(systemName: "waveform")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(hasAPIKey ? Color.accentColor : Color.secondary)
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!hasAPIKey)
-            .help("Start a hands-free voice conversation")
-            #endif
-
             TextField("Message the assistant…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)

@@ -681,6 +681,8 @@ struct SettingsView: View {
                 }
                 #endif
             }
+            // The iOS root replaces the system tab bar with its own bottom bar.
+            .hidesNativeTabBar()
         }
     }
 

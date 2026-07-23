@@ -9,6 +9,9 @@ struct TodayView: View {
 
     @State private var searchText = ""
     @State private var briefingVM = MorningBriefingViewModel()
+    /// Manual entry is the rare path (the AI assistant and Voice do the heavy
+    /// lifting), so it lives here as a quiet "+" in the header — not in the bar.
+    @State private var showingAddReminder = false
     @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
 
     /// Lightweight, Sendable snapshots for the once-a-day briefing.
@@ -131,7 +134,7 @@ struct TodayView: View {
             let data = categorizedReminders
 
             ScrollView {
-                LazyVStack(spacing: Constants.Spacing.sm) {
+                LazyVStack(spacing: Constants.Spacing.md) {
                     // AI morning briefing (once per day, dismissible)
                     if searchText.isEmpty {
                         MorningBriefingCard(state: briefingVM.state) {
@@ -147,72 +150,60 @@ struct TodayView: View {
                     // Urgent / Time-sensitive / High Priority - grouped by category
                     if !data.needsAttention.isEmpty {
                         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                            HStack(spacing: Constants.Spacing.xs) {
-                                Image(systemName: "exclamationmark.circle.fill")
-                                    .foregroundStyle(.red)
-                                Text("Needs Attention")
-                                    .font(.headline)
-                            }
+                            TodaySectionHeader(
+                                icon: "exclamationmark.circle.fill",
+                                tint: AppColors.destructive,
+                                title: "Needs Attention",
+                                count: "\(data.needsAttention.count)"
+                            )
 
-                            VStack(spacing: Constants.Spacing.md) {
+                            VStack(alignment: .leading, spacing: Constants.Spacing.md) {
                                 ForEach(Array(data.needsAttentionByCategory.enumerated()), id: \.offset) { _, group in
-                                        VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
-                                            // Category header
-                                            if let category = group.category {
-                                                HStack(spacing: 4) {
-                                                    Image(systemName: category.icon)
-                                                        .font(.caption)
-                                                    Text(category.name)
-                                                        .font(.caption)
-                                                        .fontWeight(.medium)
-                                                }
-                                                .foregroundStyle(category.color)
-                                            } else {
-                                                Text("Uncategorized")
-                                                    .font(.caption)
-                                                    .fontWeight(.medium)
-                                                    .foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
+                                        // Category header
+                                        if let category = group.category {
+                                            HStack(spacing: Constants.Spacing.xxs) {
+                                                Image(systemName: category.icon)
+                                                    .font(.caption2.weight(.semibold))
+                                                Text(category.name)
+                                                    .font(.caption.weight(.semibold))
                                             }
+                                            .foregroundStyle(category.color)
+                                        } else {
+                                            Text("Uncategorized")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
 
-                                            // Reminders in this category
-                                            ForEach(group.reminders) { reminder in
-                                                NeedsAttentionRow(reminder: reminder)
-                                            }
+                                        // Reminders in this category
+                                        ForEach(group.reminders) { reminder in
+                                            NeedsAttentionRow(reminder: reminder)
                                         }
                                     }
                                 }
                             }
-                            .padding(Constants.Spacing.md)
-                            .background(
-                                RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                                    .fill(Color.red.opacity(0.08))
-                            )
                         }
+                        .todaySectionCard(tint: AppColors.destructive)
+                    }
 
                     // Upcoming - due in the next 2 days
                     if !data.upcoming.isEmpty {
                         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                            HStack(spacing: Constants.Spacing.xs) {
-                                Image(systemName: "calendar.badge.clock")
-                                    .foregroundStyle(.blue)
-                                Text("Upcoming")
-                                    .font(.headline)
-                                Spacer()
-                                Text("\(data.upcoming.count)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
+                            TodaySectionHeader(
+                                icon: "calendar.badge.clock",
+                                tint: AppColors.accent,
+                                title: "Upcoming",
+                                count: "\(data.upcoming.count)"
+                            )
 
-                            ForEach(data.upcoming) { reminder in
+                            VStack(spacing: Constants.Spacing.xs) {
+                                ForEach(data.upcoming) { reminder in
                                     UpcomingReminderRow(reminder: reminder)
                                 }
                             }
-                            .padding(Constants.Spacing.md)
-                            .background(
-                                RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                                    .fill(Color.blue.opacity(0.08))
-                            )
                         }
+                        .todaySectionCard(tint: AppColors.accent)
+                    }
 
                     // Categories with reminders
                     ForEach(categories.filter { $0.name != "Habits" }) { category in
@@ -236,7 +227,7 @@ struct TodayView: View {
                             ContentUnavailableView(
                                 "All Caught Up",
                                 systemImage: "checkmark.circle",
-                                description: Text("Nothing needs your attention right now. Tap + to add a reminder.")
+                                description: Text("Nothing needs your attention right now. Ask the Assistant or tap + to add a reminder.")
                             )
                             .padding(.top, Constants.Spacing.xl)
                         } else {
@@ -255,9 +246,29 @@ struct TodayView: View {
             .navigationTitle("Gentle Nudge")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
+            // Manual add is deliberately secondary (AI chat + voice are the
+            // primary capture paths), so it's a quiet toolbar "+" — no longer a
+            // top-level bar item.
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        HapticManager.impact(.light)
+                        showingAddReminder = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("New Reminder")
+                }
+            }
             #endif
             .searchable(text: $searchText, prompt: "Search reminders")
+            .hidesNativeTabBar()
         }
+        #if os(iOS)
+        .sheet(isPresented: $showingAddReminder) {
+            AddReminderView()
+        }
+        #endif
         .task {
             await briefingVM.refreshIfNeeded(reminders: reminderSummaries)
         }
@@ -326,11 +337,62 @@ struct MorningBriefingCard: View {
     @ViewBuilder
     private func container<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
-            .padding(Constants.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .todaySectionCard(tint: AppColors.accent)
+    }
+}
+
+// MARK: - Shared Today chrome
+
+/// One header style for every Today section — tinted icon, headline title, and a
+/// right-aligned count — so the sections read as one system.
+struct TodaySectionHeader: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    var count: String?
+
+    var body: some View {
+        HStack(spacing: Constants.Spacing.xs) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.headline)
+            Spacer()
+            if let count {
+                Text(count)
+                    .font(.subheadline.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+extension View {
+    /// Shared container chrome for a Today section: consistent padding, a soft
+    /// tint wash, and a continuous corner radius.
+    func todaySectionCard(tint: Color) -> some View {
+        self
+            .padding(Constants.Spacing.md)
             .background(
-                RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                    .fill(AppColors.accent.opacity(0.10))
+                RoundedRectangle(cornerRadius: Constants.CornerRadius.lg, style: .continuous)
+                    .fill(tint.opacity(0.08))
+            )
+    }
+
+    /// Shared chrome for a reminder card inside a section: solid fill plus a
+    /// hairline border so cards keep their edge in both light and dark mode.
+    func todayRowCard() -> some View {
+        self
+            .background(
+                AppColors.background,
+                in: RoundedRectangle(cornerRadius: Constants.CornerRadius.md, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Constants.CornerRadius.md, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
             )
     }
 }
@@ -348,25 +410,21 @@ struct HabitsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-            HStack {
-                Image(systemName: "leaf.circle.fill")
-                    .foregroundStyle(habitColor)
-                Text("Habits")
-                    .font(.headline)
-                Spacer()
-                Text("\(completedCount)/\(habits.count)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            TodaySectionHeader(
+                icon: "leaf.circle.fill",
+                tint: habitColor,
+                title: "Habits",
+                count: "\(completedCount)/\(habits.count)"
+            )
 
             // Progress bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
+                    Capsule()
                         .fill(habitColor.opacity(0.2))
                         .frame(height: 5)
 
-                    RoundedRectangle(cornerRadius: 3)
+                    Capsule()
                         .fill(habitColor)
                         .frame(width: geo.size.width * CGFloat(completedCount) / CGFloat(max(habits.count, 1)), height: 5)
                         .animation(.spring, value: completedCount)
@@ -374,17 +432,13 @@ struct HabitsSection: View {
             }
             .frame(height: 5)
 
-            VStack(spacing: 4) {
+            VStack(spacing: Constants.Spacing.xs) {
                 ForEach(habits) { habit in
                     HabitRow(habit: habit)
                 }
             }
         }
-        .padding(Constants.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                .fill(Color.teal.opacity(0.10))
-        )
+        .todaySectionCard(tint: habitColor)
     }
 }
 
@@ -458,9 +512,8 @@ struct HabitRow: View {
             #endif
         }
         .padding(.vertical, Constants.Spacing.xs)
-        .padding(.horizontal, Constants.Spacing.xs)
-        .background(AppColors.background.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+        .padding(.horizontal, Constants.Spacing.sm)
+        .todayRowCard()
         #if os(iOS)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -562,9 +615,9 @@ struct UpcomingReminderRow: View {
             .buttonStyle(.plain)
 
             // Content
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(reminder.title)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.medium))
                     .lineLimit(1)
 
                 HStack(spacing: Constants.Spacing.xs) {
@@ -581,8 +634,8 @@ struct UpcomingReminderRow: View {
 
                     // Due date
                     Text(daysUntilText)
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(AppColors.accent)
 
                     // Recurrence badge
                     if reminder.isRecurring {
@@ -594,9 +647,8 @@ struct UpcomingReminderRow: View {
             Spacer()
         }
         .padding(.vertical, Constants.Spacing.xs)
-        .padding(.horizontal, Constants.Spacing.xs)
-        .background(AppColors.background.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+        .padding(.horizontal, Constants.Spacing.sm)
+        .todayRowCard()
         .contentShape(Rectangle())
         .onTapGesture {
             showingDetail = true
@@ -643,9 +695,9 @@ struct NeedsAttentionRow: View {
             .padding(.top, 2)
 
             // Title and metadata
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(reminder.title)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
                     .strikethrough(reminder.isCompleted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -653,9 +705,9 @@ struct NeedsAttentionRow: View {
                 // Due date and recurrence info (category shown in group header)
                 HStack(spacing: 6) {
                     if let dueDate = reminder.dueDate {
-                        Text(formatDate(dueDate))
-                            .font(.caption2)
-                            .foregroundStyle(dateColor(dueDate))
+                        Text(dueText(dueDate))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(dueColor(dueDate))
                     }
 
                     if reminder.isRecurring {
@@ -663,13 +715,11 @@ struct NeedsAttentionRow: View {
                     }
                 }
             }
-            .onTapGesture {
-                showingDetail = true
-            }
 
-            Spacer()
+            Spacer(minLength: Constants.Spacing.xs)
 
-            // Snooze button
+            // Snooze button — a soft tinted capsule (quiet next to the checkbox,
+            // which is the primary action).
             Button {
                 withAnimation(Constants.Animation.spring) {
                     HapticManager.impact(.light)
@@ -677,20 +727,24 @@ struct NeedsAttentionRow: View {
                 }
             } label: {
                 Text("Snooze")
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.orange)
-                    .clipShape(Capsule())
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppColors.warning)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(AppColors.warning.opacity(0.15), in: Capsule())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Snooze until tomorrow")
         }
         .padding(.vertical, 10)
         .padding(.horizontal, Constants.Spacing.sm)
-        .background(AppColors.background)
-        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
+        .todayRowCard()
+        // The whole card opens the detail sheet (buttons still win their taps),
+        // not just the title text.
+        .contentShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md, style: .continuous))
+        .onTapGesture {
+            showingDetail = true
+        }
         .sheet(isPresented: $showingDetail) {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
@@ -710,29 +764,34 @@ struct NeedsAttentionRow: View {
         reminder.dueDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow)
     }
 
-    private func formatDate(_ date: Date) -> String {
+    /// Overdue wording that says what it means ("3 days overdue") instead of a
+    /// bare "3 days ago", plus Today/Tomorrow shortcuts.
+    private func dueText(_ date: Date) -> String {
         let calendar = Calendar.current
         if calendar.isDateInToday(date) {
-            return "Today"
+            return "Due today"
         }
         if calendar.isDateInTomorrow(date) {
             return "Tomorrow"
         }
-        if calendar.isDateInYesterday(date) {
-            return "Yesterday"
-        }
-        // Overdue: relative wording is clearer than a bare past date
         let today = calendar.startOfDay(for: Date())
         let day = calendar.startOfDay(for: date)
         if day < today, let days = calendar.dateComponents([.day], from: day, to: today).day {
-            return "\(days) days ago"
+            return days == 1 ? "1 day overdue" : "\(days) days overdue"
         }
         return date.formatted(date: .abbreviated, time: .omitted)
     }
 
-    private func dateColor(_ date: Date) -> Color {
-        if date < Date() { return .red }
-        if Calendar.current.isDateInToday(date) { return .orange }
+    /// Whole-day comparison so an item due later today reads as "due" (warning),
+    /// not already "overdue" (red).
+    private func dueColor(_ date: Date) -> Color {
+        let calendar = Calendar.current
+        if calendar.startOfDay(for: date) < calendar.startOfDay(for: Date()) {
+            return AppColors.destructive
+        }
+        if calendar.isDateInToday(date) {
+            return AppColors.warning
+        }
         return .secondary
     }
 }
@@ -744,28 +803,20 @@ struct UncategorizedSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-            HStack(spacing: Constants.Spacing.xs) {
-                Image(systemName: "questionmark.folder.fill")
-                    .foregroundStyle(.gray)
-                Text("Uncategorized")
-                    .font(.headline)
-                Spacer()
-                Text("\(reminders.count)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            TodaySectionHeader(
+                icon: "questionmark.folder.fill",
+                tint: .gray,
+                title: "Uncategorized",
+                count: "\(reminders.count)"
+            )
 
-            VStack(spacing: 4) {
+            VStack(spacing: Constants.Spacing.xxs) {
                 ForEach(reminders) { reminder in
                     ReminderRow(reminder: reminder)
                 }
             }
         }
-        .padding(Constants.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                .fill(Color.gray.opacity(0.10))
-        )
+        .todaySectionCard(tint: .gray)
     }
 }
 
@@ -800,15 +851,17 @@ struct HomeCategorySection: View {
             } label: {
                 HStack(spacing: Constants.Spacing.xs) {
                     Image(systemName: category.icon)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(category.color)
                     Text(category.name)
                         .font(.headline)
                     Spacer()
                     Text("\(reminders.count)")
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
                     Image(systemName: "chevron.right")
-                        .font(.caption)
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -816,7 +869,7 @@ struct HomeCategorySection: View {
 
             // Active reminders
             if !activeReminders.isEmpty {
-                VStack(spacing: 4) {
+                VStack(spacing: Constants.Spacing.xxs) {
                     ForEach(activeReminders) { reminder in
                         ReminderRow(reminder: reminder)
                     }
@@ -826,7 +879,7 @@ struct HomeCategorySection: View {
             // Upcoming recurring (collapsed section)
             if !upcomingRecurring.isEmpty {
                 DisclosureGroup {
-                    VStack(spacing: 4) {
+                    VStack(spacing: Constants.Spacing.xxs) {
                         ForEach(upcomingRecurring) { reminder in
                             ReminderRow(reminder: reminder)
                         }
@@ -843,11 +896,7 @@ struct HomeCategorySection: View {
                 .tint(.secondary)
             }
         }
-        .padding(Constants.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: Constants.CornerRadius.md)
-                .fill(category.color.opacity(0.10))
-        )
+        .todaySectionCard(tint: category.color)
     }
 }
 

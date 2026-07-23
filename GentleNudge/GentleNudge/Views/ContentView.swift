@@ -1,15 +1,43 @@
 import SwiftUI
 import SwiftData
+import Combine
+#if os(iOS)
+import UIKit
+#endif
 
+/// The iOS root. Three real destinations — Today, Assistant, Settings — behind a
+/// custom bottom bar that puts the two AI capture methods first:
+///
+/// - **Voice** is the bar's single emphasized action (a large accent orb, the
+///   biggest thing in the bar) and launches the hands-free `VoiceModeView`
+///   full screen. It is not a tab; it presents over whatever is selected.
+/// - **Assistant** (text AI) stays a first-class tab beside Today.
+/// - **Manual entry** is deliberately demoted: the old "New" pseudo-tab is gone,
+///   replaced by a "+" in the Today header (`TodayView`), since hand-entry is
+///   the rare path.
+///
+/// The native `TabView` is kept underneath (hidden system bar) so tab lifecycle
+/// and state preservation behave exactly as before.
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(ChatCoordinator.self) private var coordinator
     @Query private var reminders: [Reminder]
+
+    /// Today = 0, Assistant = 1, Settings = 2. (Voice is not a tab.)
     @State private var selectedTab = 0
-    /// The last non-pseudo tab, so tapping "New" returns here instead of a
-    /// hard-coded 0 (Today=0, Assistant=1, Settings=3 are real; New=2 is a sheet).
-    @State private var lastRealTab = 0
-    @State private var showingAddReminder = false
     @State private var showingOnboarding = false
+
+    /// The one TTS engine, owned at the root (it used to live in `ChatView`) so
+    /// the promoted Voice entry can hand it to `VoiceModeView`: mute state and
+    /// the OpenAI-vs-Apple routing stay global, and only one engine ever speaks.
+    @State private var synthesizer = SpeechSynthesizer()
+    @State private var showingVoiceMode = false
+
+    #if os(iOS)
+    /// Mirrors native behavior under the keyboard: the system tab bar sits
+    /// behind the keyboard, so the custom bar hides while typing.
+    @State private var keyboardVisible = false
+    #endif
 
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var notificationUpdateTask: Task<Void, Never>?
@@ -70,46 +98,36 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             TodayView()
-                .tabItem {
-                    Label("Today", systemImage: "checklist")
-                }
+                .hidesNativeTabBar()
                 .tag(0)
 
-            ChatView(onOpenSettings: { selectedTab = 3 })
-                .tabItem {
-                    Label("Assistant", systemImage: "sparkles")
-                }
+            ChatView(onOpenSettings: { selectedTab = 2 })
+                .hidesNativeTabBar()
                 .tag(1)
 
-            // Empty view for "New" tab - triggers sheet via onChange
-            Color.clear
-                .tabItem {
-                    Label("New", systemImage: "plus.app.fill")
-                }
-                .tag(2)
-
             SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape.fill")
-                }
-                .tag(3)
-        }
-        .onChange(of: selectedTab) { _, newTab in
-            if newTab == 2 {
-                // "New" is a pseudo-tab: show the add sheet and bounce back to the
-                // last real tab (not a hard-coded 0).
-                HapticManager.impact(.light)
-                showingAddReminder = true
-                selectedTab = lastRealTab
-            } else {
-                // Remember the most recent real tab (0 / 1 / 3).
-                lastRealTab = newTab
-            }
-        }
-        .sheet(isPresented: $showingAddReminder) {
-            AddReminderView()
+                .hidesNativeTabBar()
+                .tag(2)
         }
         #if os(iOS)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !keyboardVisible {
+                bottomBar
+            }
+        }
+        // Voice gets the app-level coordinator (same conversation as typed chat)
+        // and the root-owned synthesizer, exactly as it did when launched from
+        // inside the Assistant — only the entry point moved.
+        .fullScreenCover(isPresented: $showingVoiceMode) {
+            VoiceModeView(synthesizer: synthesizer, onOpenSettings: { selectedTab = 2 })
+                .environment(coordinator)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.2)) { keyboardVisible = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeOut(duration: 0.2)) { keyboardVisible = false }
+        }
         .sheet(isPresented: $showingOnboarding) {
             OnboardingView()
         }
@@ -178,7 +196,110 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Custom bottom bar (iOS)
+
+#if os(iOS)
+private extension ContentView {
+    /// Four equal slots — Today · Assistant · Voice · Settings — on a standard
+    /// bar material with a hairline on top. The Voice orb is deliberately the
+    /// largest element (the owner's primary capture method); everything else
+    /// keeps the compact native tab look.
+    var bottomBar: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            tabButton(0, "Today", "checklist")
+            tabButton(1, "Assistant", "sparkles")
+            voiceButton
+            tabButton(2, "Settings", "gearshape.fill")
+        }
+        .padding(.top, Constants.Spacing.xs)
+        .padding(.horizontal, Constants.Spacing.xs)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    func tabButton(_ tag: Int, _ title: String, _ icon: String) -> some View {
+        Button {
+            selectedTab = tag
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 21, weight: .medium))
+                    .frame(height: 24)
+                Text(title)
+                    .font(.caption2.weight(.medium))
+            }
+            .foregroundStyle(selectedTab == tag ? AppColors.accent : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selectedTab == tag ? .isSelected : [])
+    }
+
+    /// The emphasized Voice entry: a large accent orb (echoing the voice-mode
+    /// orb) that starts a hands-free conversation immediately. `VoiceModeView`
+    /// itself handles the no-API-key state with a Settings hint, so the button
+    /// is always enabled.
+    var voiceButton: some View {
+        Button {
+            HapticManager.impact(.medium)
+            showingVoiceMode = true
+        } label: {
+            VStack(spacing: 3) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [AppColors.accent.opacity(0.85), AppColors.accent],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: AppColors.accent.opacity(0.35), radius: 8, y: 3)
+                    Image(systemName: "waveform")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 54, height: 54)
+                Text("Voice")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppColors.accent)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Voice")
+        .accessibilityHint("Starts a hands-free voice conversation with the assistant")
+    }
+}
+#endif
+
+extension View {
+    /// Hides the native tab bar (replaced by the custom bar above). Applied both
+    /// at the tab-child level and inside each tab's `NavigationStack` root, since
+    /// the preference must reach the enclosing `TabView` from the navigation
+    /// content. Cross-platform no-op on macOS, where `ContentView` isn't used
+    /// and the `.tabBar` placement doesn't exist.
+    @ViewBuilder
+    func hidesNativeTabBar() -> some View {
+        #if os(iOS)
+        self.toolbarVisibility(.hidden, for: .tabBar)
+        #else
+        self
+        #endif
+    }
+}
+
 #Preview {
-    ContentView()
-        .modelContainer(for: [Reminder.self, Category.self], inMemory: true)
+    let container = try! ModelContainer(
+        for: Reminder.self, Category.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    return ContentView()
+        .environment(ChatCoordinator(modelContainer: container))
+        .modelContainer(container)
 }

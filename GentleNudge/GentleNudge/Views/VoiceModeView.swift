@@ -30,17 +30,18 @@ import SwiftData
 ///
 /// ## Who owns TTS / re-listen (no double-speak)
 /// While presented, this view TAKES OVER `coordinator.onAssistantReply` (saving
-/// whatever `ChatView` had wired) so the reply is spoken exactly once, here, and
+/// whatever handler was wired) so the reply is spoken exactly once, here, and
 /// its completion drives the next listen. On dismiss it restores the previous
 /// handler and fully tears the mic down. The `SpeechSynthesizer` is the SAME
-/// instance `ChatView` owns, so the global mute + OpenAI-vs-Apple routing are
-/// shared and only one engine ever talks.
+/// app-level instance `ContentView` owns, so the global mute + OpenAI-vs-Apple
+/// routing are shared and only one engine ever talks.
 struct VoiceModeView: View {
     @Environment(ChatCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
 
-    /// Shared with `ChatView` so mute state and the neural/Apple routing are one
-    /// and the same, and only a single TTS engine is ever active.
+    /// The app-level engine (owned by `ContentView`, which hosts the Voice entry
+    /// in the bottom bar) so mute state and the neural/Apple routing are one and
+    /// the same, and only a single TTS engine is ever active.
     let synthesizer: SpeechSynthesizer
     /// Settings deep link (used by the no-key state). Dismisses first, then routes.
     var onOpenSettings: (() -> Void)?
@@ -60,7 +61,7 @@ struct VoiceModeView: View {
     /// True once we've wired the callbacks + saved the prior reply handler, so
     /// `onAppear` firing again can't double-wire or clobber the saved handler.
     @State private var started = false
-    /// Whatever reply handler `ChatView` had installed, restored on dismiss.
+    /// Whatever reply handler was installed before we took over, restored on dismiss.
     @State private var savedReplyHandler: (@MainActor (String) -> Void)?
     /// True once we've swapped in our own reply handler, so `end()` restores the
     /// saved one only when we actually took over (never clobbers on the no-key path).
