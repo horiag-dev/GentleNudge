@@ -65,12 +65,12 @@ enum Constants {
         Tone: conversational and natural, like talking with a good friend. \
         Relaxed and encouraging, never formal, stiff, or robotic.
 
-        Pacing: calm and unhurried, at an easy conversational speed — never \
-        rushed, never dragging.
+        Pacing: brisk and efficient — noticeably quicker than a casual chat, \
+        the tempo of a friend who's glad to help but respects your time. Keep \
+        the momentum up; do not drag, and never draw words out.
 
-        Pauses: breathe naturally. Take brief pauses at commas and between \
-        sentences, and a slightly longer beat between separate thoughts or \
-        list items.
+        Pauses: keep them short — just a quick beat at commas and between \
+        sentences, enough to sound natural but never slow.
 
         Delivery: smooth and even, with light natural emphasis on the details \
         that matter (task names, dates, and times). Vary the intonation the \
