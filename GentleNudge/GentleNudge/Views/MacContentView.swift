@@ -1032,6 +1032,6 @@ struct MacSettingsSheet: View {
 
 #Preview {
     MacContentView()
-        .modelContainer(for: [Reminder.self, Category.self], inMemory: true)
+        .modelContainer(for: [Reminder.self, Category.self, UserMemory.self], inMemory: true)
 }
 #endif

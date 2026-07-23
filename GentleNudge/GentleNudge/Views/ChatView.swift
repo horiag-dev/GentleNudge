@@ -173,6 +173,8 @@ struct ChatView: View {
             DeletedCard(title: title)
         case .cleanupCard(_, let count, let isCompletion):
             CleanupCard(count: count, isCompletion: isCompletion)
+        case .memoryCard(_, let memoryID, let content, let kind, let action):
+            MemoryCard(memoryID: memoryID, content: content, kind: kind, action: action)
         }
     }
 
@@ -350,7 +352,7 @@ struct ChatView: View {
 
 #Preview {
     let container = try! ModelContainer(
-        for: Reminder.self, Category.self,
+        for: Reminder.self, Category.self, UserMemory.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
     return ChatView()

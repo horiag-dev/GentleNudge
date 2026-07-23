@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
+    @Query(sort: \UserMemory.updatedAt, order: .reverse) private var memories: [UserMemory]
 
     @State private var syncStatus: SyncStatus = .idle
     @State private var showingSyncAlert = false
@@ -51,6 +52,8 @@ struct SettingsView: View {
     @State private var showingBackupAlert = false
     @State private var backupAlertMessage = ""
     @State private var backupAlertIsError = false
+    @State private var editingMemory: UserMemory?
+    @State private var showingClearMemoriesConfirmation = false
 
     enum SyncStatus {
         case idle
@@ -308,6 +311,41 @@ struct SettingsView: View {
                     Text("Assistant Voice")
                 } footer: {
                     Text("The assistant speaks replies with OpenAI's neural voice (gpt-4o-mini-tts). The OpenAI key is used only for the spoken voice and is stored in your Keychain. Get one at platform.openai.com/api-keys. Without a key — or with Neural Voice off — it falls back to the built-in system voice.")
+                }
+
+                // Memory (the assistant's long-term facts about the user)
+                Section {
+                    if memories.isEmpty {
+                        Text("The assistant remembers things you tell it — like family names and preferences — and uses them to help you. Nothing saved yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(memories) { memory in
+                            Button {
+                                editingMemory = memory
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(memory.content)
+                                        .foregroundStyle(.primary)
+                                    Text(memory.kind.capitalized)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .onDelete(perform: deleteMemories)
+
+                        Button(role: .destructive) {
+                            showingClearMemoriesConfirmation = true
+                        } label: {
+                            Label("Clear All Memories", systemImage: "trash")
+                        }
+                    }
+                } header: {
+                    Text("Memory")
+                } footer: {
+                    Text("Facts the assistant has learned about you. Tap one to edit it, or swipe to delete. Memories sync with iCloud like your reminders.")
                 }
 
                 // Statistics
@@ -632,6 +670,16 @@ struct SettingsView: View {
             } message: {
                 Text("This will permanently delete ALL reminders. This action cannot be undone.")
             }
+            .confirmationDialog("Clear All Memories", isPresented: $showingClearMemoriesConfirmation) {
+                Button("Clear All", role: .destructive) {
+                    clearAllMemories()
+                }
+            } message: {
+                Text("This will permanently delete everything the assistant remembers about you. This action cannot be undone.")
+            }
+            .sheet(item: $editingMemory) { memory in
+                MemoryEditSheet(memory: memory)
+            }
             .sheet(isPresented: $showingImport) {
                 ImportRemindersView()
             }
@@ -834,6 +882,22 @@ struct SettingsView: View {
     private func deleteAllReminders() {
         for reminder in reminders {
             modelContext.delete(reminder)
+        }
+        try? modelContext.save()
+        HapticManager.notification(.success)
+    }
+
+    private func deleteMemories(at offsets: IndexSet) {
+        for index in offsets {
+            modelContext.delete(memories[index])
+        }
+        try? modelContext.save()
+        HapticManager.notification(.success)
+    }
+
+    private func clearAllMemories() {
+        for memory in memories {
+            modelContext.delete(memory)
         }
         try? modelContext.save()
         HapticManager.notification(.success)
@@ -1222,8 +1286,11 @@ struct SettingsView: View {
 
         Task {
             do {
-                // Create a container pointing to local-only database
-                let schema = Schema([Reminder.self, Category.self])
+                // Create a container pointing to local-only database.
+                // Must match the shared container's full schema (including
+                // UserMemory) — opening the same store file with a subset
+                // schema would force an unwanted migration.
+                let schema = Schema([Reminder.self, Category.self, UserMemory.self])
                 let localConfig = ModelConfiguration(
                     schema: schema,
                     isStoredInMemoryOnly: false,
@@ -1503,6 +1570,62 @@ struct SettingsView: View {
     }
 }
 
+/// Simple editor for one saved memory's text, presented from the Memory
+/// section. Saving bumps `updatedAt` so the fact sorts to the top and the
+/// assistant's next turn sees the revised text.
+struct MemoryEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    let memory: UserMemory
+
+    @State private var text: String = ""
+
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Memory", text: $text, axis: .vertical)
+                        .lineLimit(2...6)
+                } footer: {
+                    Text("Write the fact as a short standalone statement.")
+                }
+            }
+            .navigationTitle("Edit Memory")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(trimmedText.isEmpty)
+                }
+            }
+            .onAppear { text = memory.content }
+        }
+        #if os(macOS)
+        .frame(minWidth: 420, minHeight: 220)
+        #endif
+    }
+
+    private func save() {
+        let trimmed = trimmedText
+        guard !trimmed.isEmpty else { return }
+        if trimmed != memory.content {
+            memory.content = trimmed
+            memory.updatedAt = Date()
+            try? modelContext.save()
+        }
+        dismiss()
+    }
+}
+
 struct StatRow: View {
     let title: String
     let value: String
@@ -1538,5 +1661,5 @@ struct BackupDocument: FileDocument {
 
 #Preview {
     SettingsView()
-        .modelContainer(for: [Reminder.self, Category.self], inMemory: true)
+        .modelContainer(for: [Reminder.self, Category.self, UserMemory.self], inMemory: true)
 }

@@ -710,6 +710,119 @@ struct CleanupCard: View {
     }
 }
 
+// MARK: - Memory card (remember / update_memory)
+
+/// Confirmation card for the memory tools: "Remembered" / "Updated memory" with
+/// the saved fact and a lightweight Forget action, or a muted "Forgot that" for
+/// a deletion. Live-binds to the store through a dynamically-initialized
+/// `@Query` keyed by the memory's UUID (like `ReminderCardView`), so Forget —
+/// or a deletion from Settings — collapses the card to its muted state.
+struct MemoryCard: View {
+    @Environment(ChatCoordinator.self) private var coordinator
+
+    private let memoryID: UUID
+    private let fallbackContent: String
+    private let kind: String
+    private let action: MemoryCardAction
+
+    @Query private var matches: [UserMemory]
+
+    init(memoryID: UUID, content: String, kind: String, action: MemoryCardAction) {
+        self.memoryID = memoryID
+        self.fallbackContent = content
+        self.kind = kind
+        self.action = action
+        let id = memoryID
+        _matches = Query(filter: #Predicate<UserMemory> { $0.id == id })
+    }
+
+    var body: some View {
+        HStack {
+            Group {
+                if action != .forgotten, let memory = matches.first {
+                    loadedCard(memory)
+                } else {
+                    forgottenCard
+                }
+            }
+            .frame(maxWidth: 420, alignment: .leading)
+            Spacer(minLength: 40)
+        }
+    }
+
+    private var headerText: String {
+        action == .updated ? "Updated memory" : "Remembered"
+    }
+
+    @ViewBuilder
+    private func loadedCard(_ memory: UserMemory) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "brain")
+                    .foregroundStyle(Color.accentColor)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(headerText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(memory.content)
+                        .font(.subheadline)
+                    Text(memory.kind.capitalized)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(AppColors.background)
+                        .clipShape(Capsule())
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Button {
+                    forget()
+                } label: {
+                    Label(action == .updated ? "Forget" : "Undo", systemImage: "arrow.uturn.backward")
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .buttonStyle(.borderless)
+        }
+        .padding(12)
+        .background(AppColors.secondaryBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    /// Shown for a `update_memory` deletion, or after Undo/Forget removed the
+    /// memory. Mirrors `DeletedCard`'s quiet styling.
+    private var forgottenCard: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "brain")
+                .foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(fallbackContent)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .strikethrough()
+                Text("Forgot that")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(AppColors.secondaryBackground.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func forget() {
+        let id = memoryID
+        Task { await coordinator.deleteMemory(id: id) }
+    }
+}
+
 // MARK: - Error banner
 
 struct ChatErrorBanner: View {

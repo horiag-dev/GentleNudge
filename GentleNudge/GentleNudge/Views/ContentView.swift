@@ -297,7 +297,7 @@ extension View {
 
 #Preview {
     let container = try! ModelContainer(
-        for: Reminder.self, Category.self,
+        for: Reminder.self, Category.self, UserMemory.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
     return ContentView()

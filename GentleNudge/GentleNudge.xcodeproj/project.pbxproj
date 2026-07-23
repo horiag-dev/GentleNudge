@@ -53,6 +53,7 @@
 				GentleNudgeApp.swift,
 				Models/Category.swift,
 				Models/Reminder.swift,
+				Models/UserMemory.swift,
 				Services/AnthropicClient.swift,
 				Services/AppleRemindersService.swift,
 				Services/BackupService.swift,

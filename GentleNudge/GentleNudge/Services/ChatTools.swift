@@ -52,6 +52,21 @@ struct IDListInput: Sendable {
     let ids: [String]
 }
 
+/// A new durable fact about the user, for the `remember` tool. `kind` is
+/// normalized in the executor (unknown values fall back to "other").
+struct RememberInput: Sendable {
+    let content: String
+    let kind: String
+}
+
+/// A revision to an existing memory, for `update_memory`. `delete == true`
+/// removes the memory; otherwise a non-nil `content` replaces its text.
+struct UpdateMemoryInput: Sendable {
+    let id: String
+    let content: String?
+    let delete: Bool
+}
+
 // MARK: - Tool schema definitions (strict mode)
 
 /// Tool schemas for the chat assistant. Each tool sets `additionalProperties:
@@ -61,7 +76,7 @@ struct IDListInput: Sendable {
 /// return `is_error` tool_results for self-healing. Recurrence crosses the wire
 /// as enum *strings*, never raw ints.
 ///
-/// `strict` is intentionally OFF (nil). Enabling strict on all nine tools makes
+/// `strict` is intentionally OFF (nil). Enabling strict on all the tools makes
 /// the API compile their combined schemas and it exceeds the compilation budget
 /// ("Schema is too complex for compilation" → HTTP 400). The model produces
 /// correct structured output without strict, and the executors validate anyway.
@@ -73,12 +88,15 @@ enum ChatTools {
 
     static let statusValues = ["active", "completed", "any"]
 
+    static let memoryKindValues = ["family", "preference", "work", "health", "routine", "other"]
+
     static var all: [ToolDefinition] {
         [
             createReminder, createCategory,
             findReminders, updateReminder,
             completeReminder, uncompleteReminder, deleteReminder,
-            completeReminders, deleteReminders
+            completeReminders, deleteReminders,
+            remember, updateMemory
         ]
     }
 
@@ -313,6 +331,70 @@ enum ChatTools {
             """,
             strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: idListSchema("The UUIDs of the reminders to delete, each from find_reminders.")
+        )
+    }
+
+    static var remember: ToolDefinition {
+        ToolDefinition(
+            name: "remember",
+            description: """
+            Save a new durable fact about the user to long-term memory: family \
+            and relationships, lasting preferences, routines, important recurring \
+            context, or how they like reminders organized. Do NOT save one-off \
+            task content (create a reminder instead), ephemeral state, or \
+            sensitive secrets such as passwords or card/account numbers. Write \
+            the fact as a short standalone third-person statement about the user \
+            (e.g. "Wife is named Sarah."). Before adding, check the existing \
+            memories provided in the system context and prefer update_memory when \
+            a near-duplicate already exists.
+            """,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
+            input_schema: .object([
+                "type": .string("object"),
+                "additionalProperties": .bool(false),
+                "properties": .object([
+                    "content": stringProp(
+                        "The fact as a concise standalone statement about the user."
+                    ),
+                    "kind": enumProp(
+                        memoryKindValues,
+                        "Grouping tag for the fact. Pick the best fit; use 'other' when nothing fits."
+                    )
+                ]),
+                "required": .array(["content", "kind"].map(JSONValue.string))
+            ])
+        )
+    }
+
+    static var updateMemory: ToolDefinition {
+        ToolDefinition(
+            name: "update_memory",
+            description: """
+            Revise or delete one existing long-term memory. Use it to correct a \
+            remembered fact, merge a near-duplicate, or forget something the user \
+            asked to remove. The id comes from the memory list provided in the \
+            system context. Set delete true to forget the memory entirely; \
+            otherwise provide content with the revised text.
+            """,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
+            input_schema: .object([
+                "type": .string("object"),
+                "additionalProperties": .bool(false),
+                "properties": .object([
+                    "id": stringProp(
+                        "The UUID of the memory to change, from the memory list in the system context."
+                    ),
+                    "content": nullableProp(
+                        "string",
+                        "The revised fact text, or null when deleting."
+                    ),
+                    "delete": .object([
+                        "type": .string("boolean"),
+                        "description": .string("When true, permanently forget this memory. content is ignored.")
+                    ])
+                ]),
+                "required": .array(["id", "content", "delete"].map(JSONValue.string))
+            ])
         )
     }
 

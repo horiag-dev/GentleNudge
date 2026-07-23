@@ -33,6 +33,7 @@ struct GentleNudgeApp: App {
         let schema = Schema([
             Reminder.self,
             Category.self,
+            UserMemory.self,
         ])
 
         // Try CloudKit first, fall back to local storage if not configured

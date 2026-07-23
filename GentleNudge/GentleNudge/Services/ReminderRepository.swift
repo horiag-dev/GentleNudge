@@ -148,6 +148,21 @@ struct BatchCompletionResult: Sendable {
     let sampleTitles: [String]
 }
 
+/// Result of the memory tools (`remember` / `update_memory`). `memoryContent`
+/// and `kind` carry the saved fact for the card; `didDelete` marks a forget.
+struct MemoryResult: Sendable {
+    let content: String
+    let isError: Bool
+    let memoryID: UUID?
+    let memoryContent: String?
+    let kind: String?
+    let didDelete: Bool
+
+    static func memoryFailure(_ message: String) -> MemoryResult {
+        MemoryResult(content: message, isError: true, memoryID: nil, memoryContent: nil, kind: nil, didDelete: false)
+    }
+}
+
 extension FindRemindersResult {
     static func findFailure(_ message: String, query: String?) -> FindRemindersResult {
         FindRemindersResult(content: message, isError: true, query: query, rows: [], totalMatches: 0)
@@ -740,6 +755,98 @@ actor ReminderRepository {
         )
     }
 
+    // MARK: remember / update_memory (long-term memory)
+
+    /// Saves a new durable fact about the user. Not gated by a confirmation:
+    /// memory is low-risk and the card is the confirmation (like create_reminder).
+    func remember(_ input: RememberInput) -> MemoryResult {
+        let content = input.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else {
+            return .memoryFailure("A memory can't be empty. Provide the fact as a short standalone statement.")
+        }
+        let kind = UserMemory.normalizedKind(input.kind)
+
+        let memory = UserMemory(content: content, kind: kind)
+        modelContext.insert(memory)
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            return .memoryFailure("Couldn't save the memory: \(error.localizedDescription)")
+        }
+
+        let payload = RememberSuccess(saved: true, id: memory.id.uuidString, content: content, kind: kind)
+        let json = Self.encodeJSON(payload) ?? "{\"saved\":true,\"id\":\"\(memory.id.uuidString)\"}"
+        return MemoryResult(content: json, isError: false, memoryID: memory.id, memoryContent: content, kind: kind, didDelete: false)
+    }
+
+    /// Revises or deletes one existing memory. Unknown ids return a self-healing
+    /// error telling the model to re-read the memory list (mirroring how
+    /// updateReminder handles a missing reminder id).
+    func updateMemory(_ input: UpdateMemoryInput) -> MemoryResult {
+        guard let uuid = UUID(uuidString: input.id) else {
+            return .memoryFailure("Invalid memory id '\(input.id)'. Use an id from the memory list in the system context.")
+        }
+        guard let memory = fetchMemory(id: uuid) else {
+            return .memoryFailure("No memory with id \(input.id) exists. It may have been removed; re-read the memory list in the system context.")
+        }
+
+        if input.delete {
+            let removedContent = memory.content
+            let removedKind = memory.kind
+            modelContext.delete(memory)
+            do {
+                try modelContext.save()
+            } catch {
+                modelContext.rollback()
+                return .memoryFailure("Couldn't delete the memory: \(error.localizedDescription)")
+            }
+            let payload = MemoryDeleteSuccess(deleted: true, id: input.id, content: removedContent)
+            let json = Self.encodeJSON(payload) ?? "{\"deleted\":true}"
+            return MemoryResult(content: json, isError: false, memoryID: uuid, memoryContent: removedContent, kind: removedKind, didDelete: true)
+        }
+
+        guard let raw = input.content else {
+            return .memoryFailure("Provide content with the revised text, or set delete true to forget this memory.")
+        }
+        let content = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else {
+            return .memoryFailure("A memory can't be empty. Provide the revised text, or set delete true to forget it.")
+        }
+        memory.content = content
+        memory.updatedAt = Date()
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            return .memoryFailure("Couldn't save the change: \(error.localizedDescription)")
+        }
+        let payload = MemoryUpdateSuccess(updated: true, id: input.id, content: content, kind: memory.kind)
+        let json = Self.encodeJSON(payload) ?? "{\"updated\":true}"
+        return MemoryResult(content: json, isError: false, memoryID: uuid, memoryContent: content, kind: memory.kind, didDelete: false)
+    }
+
+    /// Removes a memory through this isolated context (the memory card's
+    /// Undo/Forget path, mirroring `deleteReminder(id:)`). A no-op if gone.
+    @discardableResult
+    func deleteMemory(id: UUID) -> Bool {
+        guard let memory = fetchMemory(id: id) else { return false }
+        modelContext.delete(memory)
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            modelContext.rollback()
+            return false
+        }
+    }
+
+    private func fetchMemory(id: UUID) -> UserMemory? {
+        var descriptor = FetchDescriptor<UserMemory>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return (try? modelContext.fetch(descriptor))?.first
+    }
+
     private func removeReminder(id: UUID) -> (didDelete: Bool, title: String?) {
         guard let reminder = fetchReminder(id: id) else { return (false, nil) }
         let title = reminder.title
@@ -982,4 +1089,24 @@ private struct BatchCompletionSuccess: Encodable {
     let completed_count: Int
     let skipped_count: Int
     let completed_titles: [String]
+}
+
+private struct RememberSuccess: Encodable {
+    let saved: Bool
+    let id: String
+    let content: String
+    let kind: String
+}
+
+private struct MemoryUpdateSuccess: Encodable {
+    let updated: Bool
+    let id: String
+    let content: String
+    let kind: String
+}
+
+private struct MemoryDeleteSuccess: Encodable {
+    let deleted: Bool
+    let id: String
+    let content: String
 }
