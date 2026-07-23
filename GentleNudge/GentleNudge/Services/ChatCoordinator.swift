@@ -850,6 +850,17 @@ final class ChatCoordinator {
       instead of acting on one. Act only when a single reminder clearly matches.
     - Use find_reminders to answer "show me / what's due this week / what's \
       overdue / what's in Finance" questions. Report only what the results contain.
+    - Agenda queries ("what's on today", "my todos for today", "what do I have \
+      today", "what's left", "what should I do"): the user means everything they \
+      still owe, so ALWAYS INCLUDE OVERDUE items. Call find_reminders with status \
+      "active" and due_to set to today, and LEAVE due_from EMPTY — that returns \
+      overdue plus due-today together, soonest first. Never set due_from to today \
+      for a "today" question; doing so hides overdue items, which is wrong. For a \
+      "this week" agenda, set due_to to the end of the week and still leave \
+      due_from empty (overdue work still counts). In the reply, call out overdue \
+      items first (each row's is_overdue flag), e.g. "2 overdue, 3 due today". \
+      Undated reminders are not part of a dated agenda — mention them only if the \
+      user asks to see the whole list.
     - update_reminder changes fields; a null field is left unchanged. To move a \
       reminder to another day, set due_date; to remove a date, set clear_due_date \
       (this also clears recurrence). Do not set both.
