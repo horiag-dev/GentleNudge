@@ -749,14 +749,6 @@ struct ChatErrorBanner: View {
 // MARK: - Empty / no-key states
 
 struct ChatEmptyState: View {
-    /// When there's meaningful cleanup potential, the number of clearable items;
-    /// nil hides the proactive "Clean up" suggestion.
-    var cleanupCount: Int?
-    let onPick: (String) -> Void
-
-    /// The phrase pre-filled (not sent) when the cleanup suggestion is tapped.
-    private let cleanupPrompt = "Clean up my list"
-
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "sparkles")
@@ -770,32 +762,6 @@ struct ChatEmptyState: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-
-            VStack(spacing: 8) {
-                if let cleanupCount, cleanupCount > 0 {
-                    Button {
-                        onPick(cleanupPrompt)
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text("🧹")
-                            Text("Clean up \(cleanupCount) \(cleanupCount == 1 ? "item" : "items")")
-                                .font(.subheadline.weight(.medium))
-                            Spacer(minLength: 0)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.accentColor.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .frame(maxWidth: 420)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 40)

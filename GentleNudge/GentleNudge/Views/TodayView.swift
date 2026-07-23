@@ -129,12 +129,68 @@ struct TodayView: View {
         )
     }
 
+    /// Inline title row: the large "Gentle Nudge" title and the quiet manual-add
+    /// "+" on one line — replacing the nav-bar large title + `.topBarTrailing`
+    /// toolbar item, which put the "+" on a row above the title.
+    private var titleRow: some View {
+        HStack {
+            Text("Gentle Nudge")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+            Spacer()
+            #if os(iOS)
+            Button {
+                HapticManager.impact(.light)
+                showingAddReminder = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.title2)
+            }
+            .accessibilityLabel("New Reminder")
+            #endif
+        }
+        .padding(.horizontal)
+        .padding(.top, Constants.Spacing.sm)
+    }
+
+    /// Custom search field just below the title row (replacing the nav-bar
+    /// `.searchable`, which would otherwise render above the custom title). Same
+    /// `searchText` binding, so filtering and the "No Results" state are intact.
+    private var searchField: some View {
+        HStack(spacing: Constants.Spacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search reminders", text: $searchText)
+                .textFieldStyle(.plain)
+                .autocorrectionDisabled()
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, Constants.Spacing.sm)
+        .padding(.vertical, Constants.Spacing.xs)
+        .background(AppColors.secondaryBackground, in: Capsule())
+        .padding(.horizontal)
+        .padding(.top, Constants.Spacing.xs)
+        .padding(.bottom, Constants.Spacing.sm)
+    }
+
     var body: some View {
         NavigationStack {
             let data = categorizedReminders
 
-            ScrollView {
-                LazyVStack(spacing: Constants.Spacing.md) {
+            VStack(spacing: 0) {
+                titleRow
+                searchField
+
+                ScrollView {
+                    LazyVStack(spacing: Constants.Spacing.md) {
                     // AI morning briefing (once per day, dismissible)
                     if searchText.isEmpty {
                         MorningBriefingCard(state: briefingVM.state) {
@@ -239,29 +295,20 @@ struct TodayView: View {
                             .padding(.top, Constants.Spacing.xl)
                         }
                     }
+                    }
+                    .padding()
                 }
-                .padding()
             }
             .background(AppColors.background)
             .navigationTitle("Gentle Nudge")
             #if os(iOS)
-            .navigationBarTitleDisplayMode(.large)
-            // Manual add is deliberately secondary (AI chat + voice are the
-            // primary capture paths), so it's a quiet toolbar "+" — no longer a
-            // top-level bar item.
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        HapticManager.impact(.light)
-                        showingAddReminder = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("New Reminder")
-                }
-            }
+            // Title + search now live in the custom header (`titleRow` /
+            // `searchField`), with the manual-add "+" on the title's line. Hide
+            // the system nav bar so there's no duplicate title and no separate
+            // top row for the "+".
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             #endif
-            .searchable(text: $searchText, prompt: "Search reminders")
             .hidesNativeTabBar()
         }
         #if os(iOS)

@@ -8,9 +8,10 @@ import UIKit
 /// The iOS root. Three real destinations — Today, Assistant, Settings — behind a
 /// custom bottom bar that puts the two AI capture methods first:
 ///
-/// - **Voice** is the bar's single emphasized action (a large accent orb, the
-///   biggest thing in the bar) and launches the hands-free `VoiceModeView`
-///   full screen. It is not a tab; it presents over whatever is selected.
+/// - **Voice** is a normal tab-sized item that stands out via an always-on
+///   distinct color (purple, reading "AI") rather than by size. It launches the
+///   hands-free `VoiceModeView` full screen. It is not a tab; it presents over
+///   whatever is selected.
 /// - **Assistant** (text AI) stays a first-class tab beside Today.
 /// - **Manual entry** is deliberately demoted: the old "New" pseudo-tab is gone,
 ///   replaced by a "+" in the Today header (`TodayView`), since hand-entry is
@@ -26,6 +27,11 @@ struct ContentView: View {
     /// Today = 0, Assistant = 1, Settings = 2. (Voice is not a tab.)
     @State private var selectedTab = 0
     @State private var showingOnboarding = false
+
+    /// Bumped whenever the Assistant tab becomes active so `ChatView` can raise
+    /// the keyboard. Driven from here (not `ChatView.onAppear`) because a
+    /// `TabView` doesn't reliably re-fire a child's `onAppear` on every switch.
+    @State private var assistantFocusTrigger = 0
 
     /// The one TTS engine, owned at the root (it used to live in `ChatView`) so
     /// the promoted Voice entry can hand it to `VoiceModeView`: mute state and
@@ -101,13 +107,19 @@ struct ContentView: View {
                 .hidesNativeTabBar()
                 .tag(0)
 
-            ChatView(onOpenSettings: { selectedTab = 2 })
+            ChatView(focusTrigger: assistantFocusTrigger, onOpenSettings: { selectedTab = 2 })
                 .hidesNativeTabBar()
                 .tag(1)
 
             SettingsView()
                 .hidesNativeTabBar()
                 .tag(2)
+        }
+        // Arriving on the Assistant tab pops the keyboard: bump the trigger the
+        // ChatView observes. ChatView itself gates on can-type (key + category)
+        // and defers the focus set so it reliably raises the keyboard.
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == 1 { assistantFocusTrigger += 1 }
         }
         #if os(iOS)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -201,9 +213,8 @@ struct ContentView: View {
 #if os(iOS)
 private extension ContentView {
     /// Four equal slots — Today · Assistant · Voice · Settings — on a standard
-    /// bar material with a hairline on top. The Voice orb is deliberately the
-    /// largest element (the owner's primary capture method); everything else
-    /// keeps the compact native tab look.
+    /// bar material with a hairline on top. Every slot keeps the compact native
+    /// tab look; Voice stands out via an always-on distinct color, not by size.
     var bottomBar: some View {
         HStack(alignment: .bottom, spacing: 0) {
             tabButton(0, "Today", "checklist")
@@ -238,35 +249,25 @@ private extension ContentView {
         .accessibilityAddTraits(selectedTab == tag ? .isSelected : [])
     }
 
-    /// The emphasized Voice entry: a large accent orb (echoing the voice-mode
-    /// orb) that starts a hands-free conversation immediately. `VoiceModeView`
-    /// itself handles the no-API-key state with a Settings hint, so the button
-    /// is always enabled.
+    /// The Voice entry: a normal tab-sized item (matching `tabButton`'s icon +
+    /// caption layout) that starts a hands-free conversation immediately. It
+    /// stands apart from the other tabs — gray when unselected, accent when
+    /// selected — with an always-on distinct purple tint that reads as the
+    /// special "AI" action. `VoiceModeView` itself handles the no-API-key state
+    /// with a Settings hint, so the button is always enabled.
     var voiceButton: some View {
         Button {
             HapticManager.impact(.medium)
             showingVoiceMode = true
         } label: {
             VStack(spacing: 3) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [AppColors.accent.opacity(0.85), AppColors.accent],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .shadow(color: AppColors.accent.opacity(0.35), radius: 8, y: 3)
-                    Image(systemName: "waveform")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 54, height: 54)
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 22, weight: .medium))
+                    .frame(height: 24)
                 Text("Voice")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(AppColors.accent)
             }
+            .foregroundStyle(Color.purple)
             .frame(maxWidth: .infinity)
             .padding(.bottom, 2)
             .contentShape(Rectangle())

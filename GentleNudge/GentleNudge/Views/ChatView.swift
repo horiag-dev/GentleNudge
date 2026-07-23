@@ -10,7 +10,11 @@ struct ChatView: View {
     @Environment(ChatCoordinator.self) private var coordinator
     @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \Category.sortOrder) private var categories: [Category]
-    @Query private var allReminders: [Reminder]
+
+    /// Bumped by the iOS root (`ContentView`) whenever the Assistant tab becomes
+    /// active, so the input auto-focuses and the keyboard comes up ready to
+    /// type. Default (0) never fires — macOS and previews leave it untouched.
+    var focusTrigger: Int = 0
 
     /// Settings deep link: iOS switches to the Settings tab; macOS opens the
     /// settings sheet. Nil in previews.
@@ -35,23 +39,6 @@ struct ChatView: View {
 
     private var hasCategories: Bool { !availableCategories.isEmpty }
 
-    /// Proactive cleanup potential for the empty-state offer. Counts completed
-    /// reminders (safe to clear) plus non-habit reminders overdue by more than 14
-    /// days (stale). The offer shows when there are ≥ 5 completed OR any very-stale
-    /// reminder; `count` is the total of both kinds. Nil hides the offer.
-    private var cleanupCount: Int? {
-        var completed = 0
-        var stale = 0
-        for r in allReminders {
-            if r.isCompleted { completed += 1; continue }
-            if r.isHabit { continue }
-            if let days = r.daysUntilDue, days < -14 { stale += 1 }
-        }
-        let count = completed + stale
-        let meaningful = completed >= 5 || stale > 0
-        return (meaningful && count > 0) ? count : nil
-    }
-
     private var canSend: Bool {
         hasAPIKey
             && hasCategories
@@ -73,6 +60,9 @@ struct ChatView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshKeyState() }
+        }
+        .onChange(of: focusTrigger) { _, _ in
+            focusInputIfReady()
         }
     }
 
@@ -103,7 +93,7 @@ struct ChatView: View {
         if !hasAPIKey {
             ChatNoKeyState(onOpenSettings: openSettings)
         } else if coordinator.transcript.isEmpty && !coordinator.isRunning {
-            // Resting state: the hero + the proactive cleanup offer, kept near the top.
+            // Resting state: the assistant hero, kept near the top.
             emptyStateScroll
         } else {
             transcriptScroll
@@ -112,10 +102,7 @@ struct ChatView: View {
 
     private var emptyStateScroll: some View {
         ScrollView {
-            ChatEmptyState(cleanupCount: cleanupCount) { prompt in
-                draft = prompt
-                inputFocused = true
-            }
+            ChatEmptyState()
         }
         .scrollDismissesKeyboard(.interactively)
     }
@@ -292,6 +279,19 @@ struct ChatView: View {
 
     private func openSettings() {
         onOpenSettings?()
+    }
+
+    /// Raise the keyboard when arriving on the Assistant tab — but only when the
+    /// user can actually type/send (a key AND at least one category; not the
+    /// no-key or empty-category states). Deferred a short async hop so the focus
+    /// set actually raises the keyboard on a tab switch. The user can still
+    /// dismiss it afterward (interactive scroll-dismiss); we don't re-assert it.
+    private func focusInputIfReady() {
+        guard hasAPIKey, hasCategories else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            inputFocused = true
+        }
     }
 
     private func refreshKeyState() {
