@@ -295,15 +295,24 @@ struct ChatView: View {
     /// user can actually type/send (a key AND at least one category; not the
     /// no-key or empty-category states). The focus set is deferred until well
     /// after the `TabView` has finished swapping this tab's content in: focusing
-    /// while the swap is still settling (the old 50 ms hop) raised the keyboard
-    /// before keyboard avoidance was tracking the freshly-installed field, which
-    /// left the composer hidden behind the keyboard. Waiting out the transition
-    /// makes the programmatic focus behave like a manual tap. The user can still
-    /// dismiss the keyboard afterward (interactive scroll-dismiss); we don't
-    /// re-assert it.
+    /// while the swap is still settling raised the keyboard before keyboard
+    /// avoidance was tracking the freshly-installed field, which left the
+    /// composer hidden behind the keyboard.
+    ///
+    /// Robustness for the intermittent "keyboard didn't pop" miss:
+    /// - Reset to `false` first. If `inputFocused` was left `true` from a prior
+    ///   visit, assigning `true` again is a no-op and SwiftUI never re-makes the
+    ///   field first responder — a `false → true` transition forces it.
+    /// - Assign `true` twice. The second, later assignment re-asserts focus in
+    ///   case the first landed a hair before the field was in the responder
+    ///   chain; it's a no-op when the keyboard is already up, so it can't
+    ///   double-fire. The user can still dismiss afterward (scroll-dismiss).
     private func focusInputIfReady() {
         guard hasAPIKey, hasCategories else { return }
         Task { @MainActor in
+            inputFocused = false
+            try? await Task.sleep(for: .milliseconds(300))
+            inputFocused = true
             try? await Task.sleep(for: .milliseconds(350))
             inputFocused = true
         }
