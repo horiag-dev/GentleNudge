@@ -83,6 +83,32 @@ struct SettingsView: View {
         return "\(version) (\(build))"
     }
 
+    // Friendly sync status for the About row, derived from the active storage
+    // mode chosen at launch (CloudKit when iCloud is reachable, else local /
+    // in-memory). Everything in the store — reminders, categories, and the
+    // assistant's memory — rides the same mode.
+    static var syncLabel: String {
+        switch AppState.shared.storageMode {
+        case .cloudKit: return "iCloud"
+        case .local: return "This device only"
+        case .memory: return "Temporary (not saved)"
+        }
+    }
+    static var syncIcon: String {
+        switch AppState.shared.storageMode {
+        case .cloudKit: return "icloud.fill"
+        case .local: return "externaldrive.fill"
+        case .memory: return "exclamationmark.icloud.fill"
+        }
+    }
+    static var syncColor: Color {
+        switch AppState.shared.storageMode {
+        case .cloudKit: return .green
+        case .local: return .orange
+        case .memory: return .red
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -394,7 +420,7 @@ struct SettingsView: View {
                 }
 
                 // About
-                Section("About") {
+                Section {
                     HStack {
                         Text("Version")
                         Spacer()
@@ -404,11 +430,22 @@ struct SettingsView: View {
                     }
 
                     HStack {
+                        Label("Sync", systemImage: Self.syncIcon)
+                        Spacer()
+                        Text(Self.syncLabel)
+                            .foregroundStyle(Self.syncColor)
+                    }
+
+                    HStack {
                         Text("Built with")
                         Spacer()
                         Text("SwiftUI + Claude AI")
                             .foregroundStyle(.secondary)
                     }
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text("When Sync shows iCloud, your reminders, categories, and the assistant's memory all sync across your devices through your private iCloud.")
                 }
 
                 // MARK: - Advanced Settings
