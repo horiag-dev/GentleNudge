@@ -39,7 +39,8 @@ struct SettingsView: View {
 
     @State private var showingOnboarding = false
     @State private var showAdvancedSettings = false
-    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
+    @AppStorage(Constants.DefaultsKeys.habitVisibility)
+    private var habitVisibilityRaw = HabitVisibility.all.rawValue
     @AppStorage(Constants.DefaultsKeys.chatModel) private var chatModel = Constants.defaultChatModel.rawValue
     @AppStorage(Constants.DefaultsKeys.reasoningEffort) private var reasoningEffort = Constants.defaultReasoningEffort.rawValue
     @AppStorage(Constants.DefaultsKeys.ttsVoice) private var ttsVoice = Constants.defaultTTSVoice.rawValue
@@ -60,6 +61,16 @@ struct SettingsView: View {
         case syncing
         case success
         case error
+    }
+
+    /// Three-way habit surfacing mode (replaces the old show/hide boolean).
+    private var habitVisibility: HabitVisibility {
+        HabitVisibility(rawValue: habitVisibilityRaw) ?? .all
+    }
+
+    /// All habit reminders, for the "Only selected" checklist.
+    private var habitReminders: [Reminder] {
+        reminders.filter { $0.isHabit }.sorted { $0.title < $1.title }
     }
 
     /// "1.2.0 (2)" — the real marketing version + build number from the bundle
@@ -157,13 +168,28 @@ struct SettingsView: View {
 
                 // MARK: - Display
                 Section {
-                    Toggle(isOn: $showHabits) {
+                    Picker(selection: $habitVisibilityRaw) {
+                        ForEach(HabitVisibility.allCases) { mode in
+                            Text(mode.label).tag(mode.rawValue)
+                        }
+                    } label: {
                         Label("Show Habits", systemImage: "leaf.circle.fill")
+                    }
+
+                    if habitVisibility == .selected {
+                        if habitReminders.isEmpty {
+                            Text("No habits yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(habitReminders) { habit in
+                                FocusHabitToggleRow(habit: habit)
+                            }
+                        }
                     }
                 } header: {
                     Text("Display")
                 } footer: {
-                    Text("Show the daily habits checklist and the Habits list. Turning this off hides habits everywhere without deleting them — your habit history is kept.")
+                    Text("Choose which habits appear in the daily checklist. \"Only selected\" shows just the habits you tick below. Hiding habits never deletes them — your habit history is kept.")
                 }
 
                 // MARK: - Manage
@@ -1634,6 +1660,19 @@ struct MemoryEditSheet: View {
             try? modelContext.save()
         }
         dismiss()
+    }
+}
+
+/// One row of the "Only selected" habits checklist: a Toggle bound to the
+/// habit's `isFocusHabit` flag. Its own view so `@Bindable` gives a direct
+/// two-way binding into the SwiftData model.
+private struct FocusHabitToggleRow: View {
+    @Bindable var habit: Reminder
+
+    var body: some View {
+        Toggle(isOn: $habit.isFocusHabit) {
+            Text(habit.title)
+        }
     }
 }
 

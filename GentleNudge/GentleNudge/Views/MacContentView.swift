@@ -16,7 +16,13 @@ struct MacContentView: View {
     @State private var showingSettings = false
     @State private var searchText = ""
     @State private var briefingVM = MorningBriefingViewModel()
-    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
+    @AppStorage(Constants.DefaultsKeys.habitVisibility)
+    private var habitVisibilityRaw = HabitVisibility.all.rawValue
+
+    /// Three-way habit surfacing mode (replaces the old show/hide boolean).
+    private var habitVisibility: HabitVisibility {
+        HabitVisibility(rawValue: habitVisibilityRaw) ?? .all
+    }
 
     /// Lightweight, Sendable snapshots for the once-a-day briefing.
     private var reminderSummaries: [MorningBriefingService.ReminderSummary] {
@@ -82,6 +88,14 @@ struct MacContentView: View {
     private var habitReminders: [Reminder] {
         reminders.filter { $0.isHabit && !$0.isCompleted }
             .sorted { $0.title < $1.title }
+    }
+
+    /// Habits surfaced on the Today view under the current visibility mode.
+    /// The dedicated Habits sidebar list intentionally keeps showing ALL
+    /// habits (`habitReminders`) — it's the management/browse surface; the
+    /// mode only governs Today surfacing.
+    private var visibleHabits: [Reminder] {
+        habitReminders.filter { habitVisibility.shows($0) }
     }
 
     private var scheduledReminders: [Reminder] {
@@ -182,7 +196,7 @@ struct MacContentView: View {
                         isSelected: selectedSidebarItem == .recurring
                     ) { selectedSidebarItem = .recurring }
 
-                    if showHabits {
+                    if habitVisibility != .none {
                         SmartListCard(
                             icon: "leaf.circle.fill",
                             color: .teal,
@@ -302,9 +316,9 @@ struct MacContentView: View {
         .sheet(isPresented: $showingSettings) {
             MacSettingsSheet()
         }
-        .onChange(of: showHabits) { _, isShown in
+        .onChange(of: habitVisibilityRaw) { _, _ in
             // Don't leave the hidden Habits list selected
-            if !isShown && selectedSidebarItem == .habits {
+            if habitVisibility == .none && selectedSidebarItem == .habits {
                 selectedSidebarItem = .today
             }
         }
@@ -333,7 +347,7 @@ struct MacContentView: View {
                 }
 
                 // All-clear state
-                if (!showHabits || habitReminders.isEmpty)
+                if visibleHabits.isEmpty
                     && needsAttentionReminders.isEmpty
                     && categoriesWithReminders.isEmpty {
                     VStack(spacing: 12) {
@@ -348,10 +362,10 @@ struct MacContentView: View {
                 }
 
                 // Habits Section
-                if showHabits && !habitReminders.isEmpty {
+                if !visibleHabits.isEmpty {
                     MacSectionCard(title: "Habits", icon: "leaf.circle.fill", color: .teal) {
                         // Progress bar
-                        let completed = habitReminders.filter { $0.isCompletedToday }.count
+                        let completed = visibleHabits.filter { $0.isCompletedToday }.count
                         VStack(spacing: 8) {
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
@@ -359,12 +373,12 @@ struct MacContentView: View {
                                         .fill(Color.teal.opacity(0.2))
                                     RoundedRectangle(cornerRadius: 3)
                                         .fill(Color.teal)
-                                        .frame(width: geo.size.width * CGFloat(completed) / CGFloat(max(habitReminders.count, 1)))
+                                        .frame(width: geo.size.width * CGFloat(completed) / CGFloat(max(visibleHabits.count, 1)))
                                 }
                             }
                             .frame(height: 6)
 
-                            ForEach(habitReminders) { habit in
+                            ForEach(visibleHabits) { habit in
                                 MacReminderRow(reminder: habit, isHabit: true, isSelected: selectedReminder?.id == habit.id) {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         selectedReminder = selectedReminder?.id == habit.id ? nil : habit
@@ -504,7 +518,9 @@ struct MacContentView: View {
         case .completed:
             return completedReminders
         case .habits:
-            return showHabits ? habitReminders : []
+            // The Habits list is the management surface: it shows ALL habits
+            // (not just the focus selection); only "Hide habits" empties it.
+            return habitVisibility == .none ? [] : habitReminders
         case .category(let cat):
             return remindersForCategory(cat)
         case .none:
@@ -753,32 +769,6 @@ struct MacReminderRow: View {
                 .foregroundStyle(.orange)
             }
 
-            // In-progress toggle for active, non-habit reminders — the slot the
-            // old Snooze button occupied. "Start" flags the reminder as begun;
-            // clicking the indigo "In Progress" badge clears it.
-            if !isHabit && !reminder.isCompleted {
-                Button {
-                    withAnimation(.spring(response: 0.3)) {
-                        reminder.setInProgress(!reminder.isInProgress)
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: reminder.isInProgress ? "circle.lefthalf.filled" : "play.circle")
-                            .font(.caption2)
-                        Text(reminder.isInProgress ? "In Progress" : "Start")
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(reminder.isInProgress ? Color.indigo : Color.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        (reminder.isInProgress ? Color.indigo : Color.secondary).opacity(0.15),
-                        in: Capsule()
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(reminder.isInProgress ? "Mark as not started" : "Mark as in progress")
-            }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
@@ -786,6 +776,32 @@ struct MacReminderRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
+        // Press-and-hold toggles the in-progress sub-state directly (shown by
+        // the indigo half-filled circle). Attached AFTER the tap gesture: a
+        // completed long press claims the interaction, so releasing does not
+        // also fire the selection tap above.
+        .onLongPressGesture {
+            guard !isHabit && !reminder.isCompleted else { return }
+            withAnimation(.spring(response: 0.3)) {
+                reminder.setInProgress(!reminder.isInProgress)
+            }
+        }
+        // Right-click menu — the discoverable Mac idiom for the same toggle
+        // (doesn't conflict with press-and-hold on macOS).
+        .contextMenu {
+            if !isHabit && !reminder.isCompleted {
+                Button {
+                    withAnimation(.spring(response: 0.3)) {
+                        reminder.setInProgress(!reminder.isInProgress)
+                    }
+                } label: {
+                    Label(
+                        reminder.isInProgress ? "Mark Not Started" : "Mark In Progress",
+                        systemImage: reminder.isInProgress ? "circle" : "circle.lefthalf.filled"
+                    )
+                }
+            }
+        }
         .opacity(isMuted ? 0.6 : 1.0)
     }
 

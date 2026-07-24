@@ -24,6 +24,10 @@ struct GentleNudgeApp: App {
     @State private var chatCoordinator: ChatCoordinator
 
     init() {
+        // One-time launch migration (alongside the habit-marker backfill below):
+        // seed the three-way habit-visibility mode from the legacy boolean.
+        Constants.migrateHabitVisibilityIfNeeded()
+
         let container = Self.makeSharedModelContainer()
         self.sharedModelContainer = container
         _chatCoordinator = State(initialValue: ChatCoordinator(modelContainer: container))

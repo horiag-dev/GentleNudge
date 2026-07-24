@@ -115,9 +115,13 @@ enum Constants {
 
     // MARK: - UserDefaults Keys
     enum DefaultsKeys {
-        /// Whether habit UI (daily checklist, Habits smart list) is shown.
-        /// Defaults to true; habit data is kept either way.
+        /// Legacy boolean for habit visibility (superseded by `habitVisibility`).
+        /// Kept only so the one-time migration can read it.
         static let showHabits = "showHabits"
+
+        /// Three-way habit visibility mode (raw value of `HabitVisibility`).
+        /// Defaults to `.all`; habit data is kept regardless of mode.
+        static let habitVisibility = "habitVisibility"
 
         /// Chat assistant model (raw value of `ChatModel`).
         static let chatModel = "chatModel"
@@ -158,6 +162,51 @@ enum Constants {
         static let quick = SwiftUI.Animation.easeInOut(duration: 0.2)
         static let standard = SwiftUI.Animation.easeInOut(duration: 0.3)
         static let spring = SwiftUI.Animation.spring(response: 0.4, dampingFraction: 0.7)
+    }
+}
+
+// MARK: - Habit Visibility
+
+/// Three-way mode for surfacing habits on the Today views (replaces the old
+/// show/hide boolean). Raw value is stored in UserDefaults via
+/// `Constants.DefaultsKeys.habitVisibility`.
+enum HabitVisibility: String, CaseIterable, Identifiable {
+    case all
+    case none
+    case selected
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: return "All habits"
+        case .none: return "Hide habits"
+        case .selected: return "Only selected"
+        }
+    }
+
+    /// Whether a given habit should surface on Today under this mode.
+    func shows(_ habit: Reminder) -> Bool {
+        switch self {
+        case .all: return true
+        case .none: return false
+        case .selected: return habit.isFocusHabit
+        }
+    }
+}
+
+extension Constants {
+    /// One-time migration: seed the three-way `habitVisibility` mode from the
+    /// legacy `showHabits` boolean so existing users keep their setting. The
+    /// old key is left in place (harmless). Idempotent — a no-op once the new
+    /// key exists or when there was never an old value.
+    static func migrateHabitVisibilityIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: DefaultsKeys.habitVisibility) == nil,
+              defaults.object(forKey: DefaultsKeys.showHabits) != nil else { return }
+        let showHabits = defaults.bool(forKey: DefaultsKeys.showHabits)
+        let mode: HabitVisibility = showHabits ? .all : .none
+        defaults.set(mode.rawValue, forKey: DefaultsKeys.habitVisibility)
     }
 }
 

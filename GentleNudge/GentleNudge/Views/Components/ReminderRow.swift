@@ -77,34 +77,6 @@ struct ReminderRow: View {
 
                 Spacer()
 
-                // In-progress toggle for active, non-habit reminders: "Start"
-                // flags the reminder as begun; tapping the indigo "In Progress"
-                // badge clears it.
-                if !reminder.isCompleted && !reminder.isHabit {
-                    Button {
-                        withAnimation(Constants.Animation.spring) {
-                            HapticManager.impact(.light)
-                            reminder.setInProgress(!reminder.isInProgress)
-                        }
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: reminder.isInProgress ? "circle.lefthalf.filled" : "play.circle")
-                                .font(.caption2)
-                            Text(reminder.isInProgress ? "In Progress" : "Start")
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(reminder.isInProgress ? Color.indigo : Color.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            (reminder.isInProgress ? Color.indigo : Color.secondary).opacity(0.15),
-                            in: Capsule()
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(reminder.isInProgress ? "Mark as not started" : "Mark as in progress")
-                }
-
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.quaternary)
@@ -115,7 +87,24 @@ struct ReminderRow: View {
             .opacity(isMuted ? 0.6 : 1.0)
         }
         .buttonStyle(.plain)
+        // This row's long-press affordance is its (pre-existing) context menu,
+        // so the in-progress toggle lives there — a raw `.onLongPressGesture`
+        // would race the menu's own long-press recognizer on iOS.
         .contextMenu {
+            if !reminder.isCompleted && !reminder.isHabit {
+                Button {
+                    withAnimation(Constants.Animation.spring) {
+                        HapticManager.impact(.light)
+                        reminder.setInProgress(!reminder.isInProgress)
+                    }
+                } label: {
+                    Label(
+                        reminder.isInProgress ? "Mark Not Started" : "Mark In Progress",
+                        systemImage: reminder.isInProgress ? "circle" : "circle.lefthalf.filled"
+                    )
+                }
+            }
+
             Button {
                 withAnimation {
                     if reminder.isCompleted {

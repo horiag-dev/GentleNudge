@@ -168,6 +168,10 @@ final class Reminder {
     /// finished it. Meaningful only on non-completed, non-habit reminders —
     /// completion always clears it, and it changes no isCompleted-based logic.
     var isInProgress: Bool = false
+    /// For the "Only selected" habit-visibility mode: the user has ticked this
+    /// habit to keep it surfaced on Today. Only meaningful for habits.
+    /// Defaulted for CloudKit-safe lightweight migration (like `isInProgress`).
+    var isFocusHabit: Bool = false
     var createdAt: Date = Date()
     var completedAt: Date?
     var aiEnhancedDescription: String?
@@ -198,6 +202,7 @@ final class Reminder {
         priority: ReminderPriority = .normal,
         isCompleted: Bool = false,
         isInProgress: Bool = false,
+        isFocusHabit: Bool = false,
         category: Category? = nil,
         recurrence: RecurrenceType = .none
     ) {
@@ -208,6 +213,7 @@ final class Reminder {
         self.priorityRaw = priority.rawValue
         self.isCompleted = isCompleted
         self.isInProgress = isInProgress
+        self.isFocusHabit = isFocusHabit
         self.createdAt = Date()
         self.category = category
         self.hasBeenSynced = false

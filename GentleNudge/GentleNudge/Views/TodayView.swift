@@ -12,7 +12,13 @@ struct TodayView: View {
     /// Manual entry is the rare path (the AI assistant and Voice do the heavy
     /// lifting), so it lives here as a quiet "+" in the header — not in the bar.
     @State private var showingAddReminder = false
-    @AppStorage(Constants.DefaultsKeys.showHabits) private var showHabits = true
+    @AppStorage(Constants.DefaultsKeys.habitVisibility)
+    private var habitVisibilityRaw = HabitVisibility.all.rawValue
+
+    /// Three-way habit surfacing mode (replaces the old show/hide boolean).
+    private var habitVisibility: HabitVisibility {
+        HabitVisibility(rawValue: habitVisibilityRaw) ?? .all
+    }
 
     /// Lightweight, Sendable snapshots for the once-a-day briefing.
     private var reminderSummaries: [MorningBriefingService.ReminderSummary] {
@@ -63,8 +69,9 @@ struct TodayView: View {
             guard filterBlock(reminder) else { continue }
 
             if reminder.isHabit {
-                // Habits never join the other buckets; only surface them when enabled
-                if showHabits {
+                // Habits never join the other buckets; the visibility mode
+                // decides which ones surface (all / none / only selected)
+                if habitVisibility.shows(reminder) {
                     habits.append(reminder)
                 }
                 continue
@@ -715,6 +722,15 @@ struct UpcomingReminderRow: View {
         .onTapGesture {
             showingDetail = true
         }
+        // Long-press toggles in-progress directly (see NeedsAttentionRow for
+        // the gesture-ordering rationale).
+        .onLongPressGesture {
+            guard !reminder.isCompleted && !reminder.isHabit else { return }
+            withAnimation(Constants.Animation.spring) {
+                HapticManager.impact(.light)
+                reminder.setInProgress(!reminder.isInProgress)
+            }
+        }
         .sheet(isPresented: $showingDetail) {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
@@ -785,35 +801,6 @@ struct NeedsAttentionRow: View {
             }
 
             Spacer(minLength: Constants.Spacing.xs)
-
-            // In-progress toggle — a soft tinted capsule in the slot the old
-            // Snooze button occupied (quiet next to the checkbox, which is the
-            // primary action). "Start" flags the reminder as begun; tapping the
-            // indigo "In Progress" badge clears it.
-            if !reminder.isCompleted {
-                Button {
-                    withAnimation(Constants.Animation.spring) {
-                        HapticManager.impact(.light)
-                        reminder.setInProgress(!reminder.isInProgress)
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: reminder.isInProgress ? "circle.lefthalf.filled" : "play.circle")
-                            .font(.caption2)
-                        Text(reminder.isInProgress ? "In Progress" : "Start")
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(reminder.isInProgress ? Color.indigo : Color.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        (reminder.isInProgress ? Color.indigo : Color.secondary).opacity(0.15),
-                        in: Capsule()
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(reminder.isInProgress ? "Mark as not started" : "Mark as in progress")
-            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, Constants.Spacing.sm)
@@ -823,6 +810,18 @@ struct NeedsAttentionRow: View {
         .contentShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md, style: .continuous))
         .onTapGesture {
             showingDetail = true
+        }
+        // Long-press toggles the in-progress sub-state directly — the only
+        // in-list way to set it (the indigo half-filled circle shows it).
+        // Attached AFTER the tap gesture: when the hold reaches the long-press
+        // threshold the long press claims the interaction, so releasing does
+        // not also fire the tap-to-open above.
+        .onLongPressGesture {
+            guard !reminder.isCompleted && !reminder.isHabit else { return }
+            withAnimation(Constants.Animation.spring) {
+                HapticManager.impact(.light)
+                reminder.setInProgress(!reminder.isInProgress)
+            }
         }
         .sheet(isPresented: $showingDetail) {
             NavigationStack {
