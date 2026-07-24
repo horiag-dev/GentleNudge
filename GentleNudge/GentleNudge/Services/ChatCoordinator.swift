@@ -897,7 +897,8 @@ final class ChatCoordinator {
             clearDueDate: input["clear_due_date"]?.boolValue ?? false,
             categoryID: input["category_id"]?.stringValue,
             recurrence: input["recurrence"]?.stringValue,
-            recurrenceAnchorDay: input["recurrence_anchor_day"]?.intValue
+            recurrenceAnchorDay: input["recurrence_anchor_day"]?.intValue,
+            inProgress: input["in_progress"]?.boolValue
         )
     }
 
@@ -986,6 +987,10 @@ final class ChatCoordinator {
     - update_reminder changes fields; a null field is left unchanged. To move a \
       reminder to another day, set due_date; to remove a date, set clear_due_date \
       (this also clears recurrence). Do not set both.
+    - When the user says they started something ("I started X", "I'm working on \
+      X", "mark X in progress"), set in_progress true via update_reminder; set it \
+      false to mark it not started again. In-progress applies to normal active \
+      reminders, not habits. Completing or deleting still uses their own tools.
     - complete_reminder marks done (recurring items spawn their next occurrence; \
       habits are marked done for today). Use uncomplete_reminder to undo. Only use \
       delete_reminder when the user wants the reminder gone, not merely finished.

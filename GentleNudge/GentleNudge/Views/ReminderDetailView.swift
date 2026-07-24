@@ -60,6 +60,36 @@ struct ReminderDetailView: View {
                     .buttonStyle(.plain)
                 }
 
+                // In-progress sub-state — only meaningful while the reminder is
+                // active (habits track per-day completion instead).
+                if !reminder.isCompleted && !reminder.isHabit {
+                    Button {
+                        withAnimation(Constants.Animation.spring) {
+                            HapticManager.impact(.light)
+                            reminder.setInProgress(!reminder.isInProgress)
+                        }
+                    } label: {
+                        HStack(spacing: Constants.Spacing.sm) {
+                            Image(systemName: reminder.isInProgress ? "circle.lefthalf.filled" : "play.circle")
+                                .font(.title)
+                                .foregroundStyle(reminder.isInProgress ? Color.indigo : Color.secondary)
+                            Text(reminder.isInProgress ? "In Progress" : "Mark In Progress")
+                                .font(.headline)
+                            Spacer()
+                            if reminder.isInProgress {
+                                Text("Tap to reset")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(reminder.isInProgress ? Color.indigo.opacity(0.1) : AppColors.secondaryBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 // Title
                 VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
                     Text("Title")

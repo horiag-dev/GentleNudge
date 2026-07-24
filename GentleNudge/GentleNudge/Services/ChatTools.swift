@@ -39,6 +39,7 @@ struct UpdateReminderInput: Sendable {
     let categoryID: String?
     let recurrence: String?        // change cadence
     let recurrenceAnchorDay: Int?
+    let inProgress: Bool?          // start/stop the "in progress" sub-state
 }
 
 /// Reference to a single reminder by id, for complete/uncomplete/delete.
@@ -219,7 +220,8 @@ enum ChatTools {
             null field is left unchanged. To move a reminder to a different day, \
             set due_date. To remove the due date entirely set clear_due_date true \
             (this also clears recurrence). Do not set both due_date and \
-            clear_due_date.
+            clear_due_date. Set in_progress true when the user has started \
+            working on the reminder, false to mark it not started.
             """,
             strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: .object([
@@ -251,11 +253,16 @@ enum ChatTools {
                     "recurrence_anchor_day": nullableProp(
                         "integer",
                         "Day of month (1-31) for month-based recurrences, or null. The due date must fall on this day (clamped to the month length)."
+                    ),
+                    "in_progress": nullableProp(
+                        "boolean",
+                        "Set true to mark the reminder as started (in progress), false to mark it not started, or null to leave unchanged. Applies to active, non-habit reminders only; completing a reminder clears it."
                     )
                 ]),
                 "required": .array([
                     "id", "title", "notes", "due_date", "clear_due_date",
-                    "category_id", "recurrence", "recurrence_anchor_day"
+                    "category_id", "recurrence", "recurrence_anchor_day",
+                    "in_progress"
                 ].map(JSONValue.string))
             ])
         )

@@ -27,9 +27,15 @@ struct ReminderRow: View {
                         }
                     }
                 } label: {
-                    Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
+                    // In-progress reads at a glance: half-filled indigo circle.
+                    // Tapping still completes, exactly as before.
+                    Image(systemName: reminder.isCompleted
+                        ? "checkmark.circle.fill"
+                        : (reminder.isInProgress ? "circle.lefthalf.filled" : "circle"))
                         .font(.body)
-                        .foregroundStyle(reminder.isCompleted ? .green : .secondary)
+                        .foregroundStyle(reminder.isCompleted
+                            ? Color.green
+                            : (reminder.isInProgress ? Color.indigo : Color.secondary))
                         .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
@@ -70,6 +76,34 @@ struct ReminderRow: View {
                 }
 
                 Spacer()
+
+                // In-progress toggle for active, non-habit reminders: "Start"
+                // flags the reminder as begun; tapping the indigo "In Progress"
+                // badge clears it.
+                if !reminder.isCompleted && !reminder.isHabit {
+                    Button {
+                        withAnimation(Constants.Animation.spring) {
+                            HapticManager.impact(.light)
+                            reminder.setInProgress(!reminder.isInProgress)
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: reminder.isInProgress ? "circle.lefthalf.filled" : "play.circle")
+                                .font(.caption2)
+                            Text(reminder.isInProgress ? "In Progress" : "Start")
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(reminder.isInProgress ? Color.indigo : Color.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            (reminder.isInProgress ? Color.indigo : Color.secondary).opacity(0.15),
+                            in: Capsule()
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(reminder.isInProgress ? "Mark as not started" : "Mark as in progress")
+                }
 
                 Image(systemName: "chevron.right")
                     .font(.caption2)

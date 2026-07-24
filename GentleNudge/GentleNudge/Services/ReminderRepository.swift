@@ -322,7 +322,7 @@ actor ReminderRepository {
     /// In-memory filter over all reminders (personal scale). Returns ≤20 rows plus
     /// the full `total_matches`. Date bounds are inclusive: `due_to` is compared
     /// against the START of the next day, so a reminder carrying a time-of-day
-    /// (e.g. a snooze that set 9 AM) still matches its due day.
+    /// (e.g. 9 AM from older data) still matches its due day.
     func findReminders(_ input: FindRemindersInput, timeZone: TimeZone) -> FindRemindersResult {
         let status = input.status.lowercased()
         guard ChatTools.statusValues.contains(status) else {
@@ -459,6 +459,19 @@ actor ReminderRepository {
             if reminder.category?.id != category.id {
                 reminder.category = category
                 changes.append(ReminderFieldChange(label: "Category", value: category.name))
+            }
+        }
+
+        // In-progress sub-state. Setting it true also revives a completed
+        // reminder (the states are mutually exclusive); habits have no
+        // in-progress notion.
+        if let inProgress = input.inProgress {
+            if reminder.isHabit {
+                return .updateFailure("Habits track per-day completion and have no in-progress state. Use complete_reminder to log today's habit instead.")
+            }
+            if inProgress != reminder.isInProgress || (inProgress && reminder.isCompleted) {
+                reminder.setInProgress(inProgress)
+                changes.append(ReminderFieldChange(label: "Status", value: inProgress ? "In Progress" : "Not started"))
             }
         }
 

@@ -95,13 +95,22 @@ struct TodayView: View {
         }
 
         habits.sort { $0.title < $1.title }
-        uncategorized.sort { $0.createdAt > $1.createdAt }
+        // In-progress items pin to the top of every active bucket (they're what
+        // the user is actively working on), then the existing order applies.
+        uncategorized.sort { r1, r2 in
+            if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
+            return r1.createdAt > r2.createdAt
+        }
         needsAttention.sort { r1, r2 in
+            if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
             if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
             return r1.priority.rawValue > r2.priority.rawValue
         }
-        upcoming.sort { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+        upcoming.sort { r1, r2 in
+            if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
+            return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
+        }
 
         // Group needs attention by category
         var grouped: [UUID?: [Reminder]] = [:]
@@ -655,9 +664,15 @@ struct UpcomingReminderRow: View {
                     }
                 }
             } label: {
-                Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
+                // In-progress reads at a glance: half-filled indigo circle.
+                // Tapping still completes, exactly as before.
+                Image(systemName: reminder.isCompleted
+                    ? "checkmark.circle.fill"
+                    : (reminder.isInProgress ? "circle.lefthalf.filled" : "circle"))
                     .font(.body)
-                    .foregroundStyle(reminder.isCompleted ? .green : .secondary)
+                    .foregroundStyle(reminder.isCompleted
+                        ? Color.green
+                        : (reminder.isInProgress ? Color.indigo : Color.secondary))
             }
             .buttonStyle(.plain)
 
@@ -733,9 +748,15 @@ struct NeedsAttentionRow: View {
                     }
                 }
             } label: {
-                Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
+                // In-progress reads at a glance: half-filled indigo circle.
+                // Tapping still completes, exactly as before.
+                Image(systemName: reminder.isCompleted
+                    ? "checkmark.circle.fill"
+                    : (reminder.isInProgress ? "circle.lefthalf.filled" : "circle"))
                     .font(.body)
-                    .foregroundStyle(reminder.isCompleted ? .green : .secondary)
+                    .foregroundStyle(reminder.isCompleted
+                        ? Color.green
+                        : (reminder.isInProgress ? Color.indigo : Color.secondary))
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
@@ -765,23 +786,34 @@ struct NeedsAttentionRow: View {
 
             Spacer(minLength: Constants.Spacing.xs)
 
-            // Snooze button — a soft tinted capsule (quiet next to the checkbox,
-            // which is the primary action).
-            Button {
-                withAnimation(Constants.Animation.spring) {
-                    HapticManager.impact(.light)
-                    snoozeToTomorrow()
-                }
-            } label: {
-                Text("Snooze")
+            // In-progress toggle — a soft tinted capsule in the slot the old
+            // Snooze button occupied (quiet next to the checkbox, which is the
+            // primary action). "Start" flags the reminder as begun; tapping the
+            // indigo "In Progress" badge clears it.
+            if !reminder.isCompleted {
+                Button {
+                    withAnimation(Constants.Animation.spring) {
+                        HapticManager.impact(.light)
+                        reminder.setInProgress(!reminder.isInProgress)
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: reminder.isInProgress ? "circle.lefthalf.filled" : "play.circle")
+                            .font(.caption2)
+                        Text(reminder.isInProgress ? "In Progress" : "Start")
+                    }
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppColors.warning)
+                    .foregroundStyle(reminder.isInProgress ? Color.indigo : Color.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(AppColors.warning.opacity(0.15), in: Capsule())
+                    .background(
+                        (reminder.isInProgress ? Color.indigo : Color.secondary).opacity(0.15),
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(reminder.isInProgress ? "Mark as not started" : "Mark as in progress")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Snooze until tomorrow")
         }
         .padding(.vertical, 10)
         .padding(.horizontal, Constants.Spacing.sm)
@@ -802,13 +834,6 @@ struct NeedsAttentionRow: View {
 
     private func completeReminder() {
         reminder.complete(in: modelContext)
-    }
-
-    private func snoozeToTomorrow() {
-        let calendar = Calendar.current
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
-        // Set to 9 AM tomorrow
-        reminder.dueDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow)
     }
 
     /// Overdue wording that says what it means ("3 days overdue") instead of a
@@ -877,7 +902,8 @@ struct HomeCategorySection: View {
     private var activeReminders: [Reminder] {
         reminders.filter { !$0.isDistantRecurring }
             .sorted { r1, r2 in
-                // Due soon first, then by priority
+                // In-progress pinned first, then due soon, then priority
+                if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
                 if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
                 if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
                 return r1.priority.rawValue > r2.priority.rawValue
@@ -957,6 +983,8 @@ struct CategoryDetailView: View {
     private var activeReminders: [Reminder] {
         reminders.filter { $0.category?.id == category.id && !$0.isCompleted && !$0.isDistantRecurring }
             .sorted { r1, r2 in
+                // In-progress pinned first, then due soon, then priority
+                if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
                 if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
                 if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
                 return r1.priority.rawValue > r2.priority.rawValue

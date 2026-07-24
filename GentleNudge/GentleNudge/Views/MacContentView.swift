@@ -51,6 +51,8 @@ struct MacContentView: View {
             return reminder.isOverdue || reminder.isDueToday
         }
         .sorted { r1, r2 in
+            // In-progress pinned first, then the existing urgency order
+            if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
             if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
             return r1.priority.rawValue > r2.priority.rawValue
@@ -84,17 +86,25 @@ struct MacContentView: View {
 
     private var scheduledReminders: [Reminder] {
         reminders.filter { !$0.isCompleted && !$0.isHabit && $0.dueDate != nil }
-            .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+            .sorted { r1, r2 in
+                // In-progress pinned first, then soonest due date
+                if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
+                return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
+            }
     }
 
     private var allActiveReminders: [Reminder] {
         reminders.filter { !$0.isCompleted && !$0.isHabit }
+            // Stable: in-progress rises to the top, everything else keeps its order
+            .sorted { $0.isInProgress && !$1.isInProgress }
     }
 
     private var recurringReminders: [Reminder] {
         reminders.filter { $0.isRecurring && !$0.isCompleted }
             .sorted { r1, r2 in
-                // Sort by recurrence frequency (daily first) then by next due date
+                // In-progress first, then recurrence frequency (daily first),
+                // then next due date
+                if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
                 if r1.recurrence.sortOrder != r2.recurrence.sortOrder {
                     return r1.recurrence.sortOrder < r2.recurrence.sortOrder
                 }
@@ -109,6 +119,8 @@ struct MacContentView: View {
 
     private func remindersForCategory(_ category: Category) -> [Reminder] {
         reminders.filter { $0.category?.id == category.id && !$0.isCompleted && !$0.isHabit }
+            // Stable: in-progress rises to the top, everything else keeps its order
+            .sorted { $0.isInProgress && !$1.isInProgress }
     }
 
     private var categoriesWithReminders: [Category] {
@@ -390,7 +402,7 @@ struct MacContentView: View {
                                 }
 
                                 ForEach(group.reminders) { reminder in
-                                    MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id, showSnooze: true) {
+                                    MacReminderRow(reminder: reminder, isHabit: false, isSelected: selectedReminder?.id == reminder.id) {
                                         withAnimation(.easeInOut(duration: 0.2)) {
                                             selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
                                         }
@@ -635,7 +647,6 @@ struct MacReminderRow: View {
     @Bindable var reminder: Reminder
     let isHabit: Bool
     let isSelected: Bool
-    var showSnooze: Bool = false
     let onTap: () -> Void
 
     private var isMuted: Bool {
@@ -678,9 +689,15 @@ struct MacReminderRow: View {
                     }
                 }
             } label: {
-                Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+                // In-progress reads at a glance: half-filled indigo circle.
+                // Tapping still completes, exactly as before.
+                Image(systemName: isChecked
+                    ? "checkmark.circle.fill"
+                    : (isInProgress ? "circle.lefthalf.filled" : "circle"))
                     .font(.title3)
-                    .foregroundStyle(isChecked ? .green : .secondary)
+                    .foregroundStyle(isChecked
+                        ? Color.green
+                        : (isInProgress ? Color.indigo : Color.secondary))
             }
             .buttonStyle(.plain)
 
@@ -736,20 +753,31 @@ struct MacReminderRow: View {
                 .foregroundStyle(.orange)
             }
 
-            // Snooze button for needs attention items
-            if showSnooze {
+            // In-progress toggle for active, non-habit reminders — the slot the
+            // old Snooze button occupied. "Start" flags the reminder as begun;
+            // clicking the indigo "In Progress" badge clears it.
+            if !isHabit && !reminder.isCompleted {
                 Button {
-                    snoozeToTomorrow()
+                    withAnimation(.spring(response: 0.3)) {
+                        reminder.setInProgress(!reminder.isInProgress)
+                    }
                 } label: {
-                    Text("Snooze")
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.orange)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
+                    HStack(spacing: 3) {
+                        Image(systemName: reminder.isInProgress ? "circle.lefthalf.filled" : "play.circle")
+                            .font(.caption2)
+                        Text(reminder.isInProgress ? "In Progress" : "Start")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(reminder.isInProgress ? Color.indigo : Color.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        (reminder.isInProgress ? Color.indigo : Color.secondary).opacity(0.15),
+                        in: Capsule()
+                    )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(reminder.isInProgress ? "Mark as not started" : "Mark as in progress")
             }
         }
         .padding(.vertical, 4)
@@ -763,6 +791,12 @@ struct MacReminderRow: View {
 
     private var isChecked: Bool {
         isHabit ? reminder.isCompletedToday : reminder.isCompleted
+    }
+
+    /// The glanceable leading indicator only applies to normal reminders —
+    /// habits have no in-progress notion.
+    private var isInProgress: Bool {
+        !isHabit && reminder.isInProgress
     }
 
     private func formatDate(_ date: Date) -> String {
@@ -793,12 +827,6 @@ struct MacReminderRow: View {
 
     private func completeReminder() {
         reminder.complete(in: modelContext)
-    }
-
-    private func snoozeToTomorrow() {
-        let calendar = Calendar.current
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
-        reminder.dueDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow)
     }
 }
 

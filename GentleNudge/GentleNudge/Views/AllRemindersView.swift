@@ -39,20 +39,26 @@ struct AllRemindersView: View {
             }
         }
 
-        // Sort based on filter type
+        // Sort based on filter type. Active items that are in progress pin to
+        // the top (completed items can never be in-progress, so the Completed
+        // sort is untouched).
         switch selectedFilter {
         case .completed:
             return result.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
         case .recurring:
-            // Sort by recurrence frequency (daily first), then by due date
+            // In-progress first, then recurrence frequency (daily first), then due date
             return result.sorted { r1, r2 in
+                if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
                 if r1.recurrence.sortOrder != r2.recurrence.sortOrder {
                     return r1.recurrence.sortOrder < r2.recurrence.sortOrder
                 }
                 return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
             }
         default:
-            return result.sorted { ($0.createdAt) > ($1.createdAt) }
+            return result.sorted { r1, r2 in
+                if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
+                return r1.createdAt > r2.createdAt
+            }
         }
     }
 

@@ -164,6 +164,10 @@ final class Reminder {
     var dueDate: Date?
     var priorityRaw: Int = 0
     var isCompleted: Bool = false
+    /// Sub-state of "active": the user has started this reminder but not yet
+    /// finished it. Meaningful only on non-completed, non-habit reminders —
+    /// completion always clears it, and it changes no isCompleted-based logic.
+    var isInProgress: Bool = false
     var createdAt: Date = Date()
     var completedAt: Date?
     var aiEnhancedDescription: String?
@@ -193,6 +197,7 @@ final class Reminder {
         dueDate: Date? = nil,
         priority: ReminderPriority = .normal,
         isCompleted: Bool = false,
+        isInProgress: Bool = false,
         category: Category? = nil,
         recurrence: RecurrenceType = .none
     ) {
@@ -202,6 +207,7 @@ final class Reminder {
         self.dueDate = dueDate
         self.priorityRaw = priority.rawValue
         self.isCompleted = isCompleted
+        self.isInProgress = isInProgress
         self.createdAt = Date()
         self.category = category
         self.hasBeenSynced = false
@@ -296,11 +302,28 @@ final class Reminder {
     func markCompleted() {
         isCompleted = true
         completedAt = Date()
+        // Done is not in-progress.
+        isInProgress = false
     }
 
     func markIncomplete() {
         isCompleted = false
         completedAt = nil
+        // Undoing a completion goes back to "not started".
+        isInProgress = false
+    }
+
+    /// Toggle the "started" sub-state. In-progress and completed are mutually
+    /// exclusive: starting a reminder also clears any completion (robustness for
+    /// the chat path — the UI never offers Start on completed items). Habits
+    /// track per-day completion instead and are never in-progress.
+    func setInProgress(_ value: Bool) {
+        guard !isHabit else { return }
+        isInProgress = value
+        if value {
+            isCompleted = false
+            completedAt = nil
+        }
     }
 
     /// Complete a reminder, handling recurring logic automatically.

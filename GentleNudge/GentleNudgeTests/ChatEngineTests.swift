@@ -361,7 +361,7 @@ final class ChatEngineExecutorTests: XCTestCase {
     func test_findReminders_dueToIsInclusiveOfTimedReminders() async throws {
         let container = try makeContainer()
         let catID = seedCategory(container, name: "Finance")
-        // A reminder carrying a time-of-day on the boundary day (snooze sets 9 AM).
+        // A reminder carrying a time-of-day on the boundary day (9 AM from older data).
         seedReminder(container, title: "Pay rent", due: date("2026-07-24", hour: 9), categoryID: catID)
         seedReminder(container, title: "Next day", due: date("2026-07-25"), categoryID: catID)
 
@@ -412,7 +412,7 @@ final class ChatEngineExecutorTests: XCTestCase {
         let repo = ReminderRepository(modelContainer: container)
         let input = UpdateReminderInput(
             id: id.uuidString, title: nil, notes: nil, dueDate: nil,
-            clearDueDate: true, categoryID: nil, recurrence: nil, recurrenceAnchorDay: nil
+            clearDueDate: true, categoryID: nil, recurrence: nil, recurrenceAnchorDay: nil, inProgress: nil
         )
         let result = await repo.updateReminder(input, timeZone: tz)
         XCTAssertFalse(result.isError)
@@ -431,7 +431,7 @@ final class ChatEngineExecutorTests: XCTestCase {
         let repo = ReminderRepository(modelContainer: container)
         let input = UpdateReminderInput(
             id: id.uuidString, title: nil, notes: nil, dueDate: "2026-09-01",
-            clearDueDate: true, categoryID: nil, recurrence: nil, recurrenceAnchorDay: nil
+            clearDueDate: true, categoryID: nil, recurrence: nil, recurrenceAnchorDay: nil, inProgress: nil
         )
         let result = await repo.updateReminder(input, timeZone: tz)
         XCTAssertTrue(result.isError)
@@ -448,7 +448,7 @@ final class ChatEngineExecutorTests: XCTestCase {
         let repo = ReminderRepository(modelContainer: container)
         let input = UpdateReminderInput(
             id: id.uuidString, title: nil, notes: nil, dueDate: "2026-03-15",
-            clearDueDate: false, categoryID: nil, recurrence: nil, recurrenceAnchorDay: nil
+            clearDueDate: false, categoryID: nil, recurrence: nil, recurrenceAnchorDay: nil, inProgress: nil
         )
         let result = await repo.updateReminder(input, timeZone: tz)
         XCTAssertFalse(result.isError)
@@ -468,7 +468,7 @@ final class ChatEngineExecutorTests: XCTestCase {
         let repo = ReminderRepository(modelContainer: container)
         let input = UpdateReminderInput(
             id: id.uuidString, title: nil, notes: nil, dueDate: nil,
-            clearDueDate: false, categoryID: nil, recurrence: nil, recurrenceAnchorDay: nil
+            clearDueDate: false, categoryID: nil, recurrence: nil, recurrenceAnchorDay: nil, inProgress: nil
         )
         let result = await repo.updateReminder(input, timeZone: tz)
         XCTAssertFalse(result.isError)
