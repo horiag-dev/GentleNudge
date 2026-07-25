@@ -783,7 +783,7 @@ final class ChatCoordinator {
         let categoryObjects = context.categories.map { snapshot in
             JSONValue.object([
                 "id": .string(snapshot.id.uuidString),
-                "name": .string(snapshot.name)
+                "name": .string(Self.sanitizedForBlock(snapshot.name))
             ])
         }
         let categoriesJSON = encodeJSONValue(.array(categoryObjects)) ?? "[]"
@@ -802,8 +802,8 @@ final class ChatCoordinator {
             let memoryObjects = context.memories.map { snapshot in
                 JSONValue.object([
                     "id": .string(snapshot.id.uuidString),
-                    "content": .string(snapshot.content),
-                    "kind": .string(snapshot.kind)
+                    "content": .string(Self.sanitizedForBlock(snapshot.content)),
+                    "kind": .string(Self.sanitizedForBlock(snapshot.kind))
                 ])
             }
             let memoriesJSON = encodeJSONValue(.array(memoryObjects)) ?? "[]"
@@ -818,6 +818,16 @@ final class ChatCoordinator {
         }
 
         return tail
+    }
+
+    /// Neutralizes angle brackets in user-controlled snapshot text before it's
+    /// embedded in the `<categories>` / `<memory>` delimited blocks, so a category
+    /// name or memory containing `</memory>` can't close the block early and slip
+    /// out of the "user data, not instructions" framing. Uses look-alike single
+    /// angle quotes so the text stays readable to the model.
+    private static func sanitizedForBlock(_ text: String) -> String {
+        text.replacingOccurrences(of: "<", with: "‹")
+            .replacingOccurrences(of: ">", with: "›")
     }
 
     // MARK: Wire history hygiene

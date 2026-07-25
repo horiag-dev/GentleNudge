@@ -76,6 +76,21 @@ struct SettingsView: View {
         reminders.filter { $0.isHabit }.sorted { $0.title < $1.title }
     }
 
+    /// One-pass counts for the Statistics section (was five separate full-array
+    /// filters per render). "Active" excludes habits + completed, matching every
+    /// other surface in the app (habits are perpetual, never "completed").
+    private var reminderStats: (total: Int, active: Int, completed: Int, overdue: Int, aiEnhanced: Int) {
+        var total = 0, active = 0, completed = 0, overdue = 0, aiEnhanced = 0
+        for r in reminders {
+            total += 1
+            if r.isCompleted { completed += 1 }
+            else if !r.isHabit { active += 1 }
+            if r.isOverdue { overdue += 1 }
+            if r.aiEnhancedDescription != nil { aiEnhanced += 1 }
+        }
+        return (total, active, completed, overdue, aiEnhanced)
+    }
+
     /// "1.2.0 (2)" — the real marketing version + build number from the bundle
     /// (which come from MARKETING_VERSION / CURRENT_PROJECT_VERSION at build
     /// time), so this row always reflects the build actually installed.
@@ -426,11 +441,12 @@ struct SettingsView: View {
 
                 // Statistics
                 Section("Statistics") {
-                    StatRow(title: "Total Reminders", value: "\(reminders.count)")
-                    StatRow(title: "Active", value: "\(reminders.filter { !$0.isCompleted }.count)")
-                    StatRow(title: "Completed", value: "\(reminders.filter { $0.isCompleted }.count)")
-                    StatRow(title: "Overdue", value: "\(reminders.filter { $0.isOverdue }.count)")
-                    StatRow(title: "AI Enhanced", value: "\(reminders.filter { $0.aiEnhancedDescription != nil }.count)")
+                    let stats = reminderStats
+                    StatRow(title: "Total Reminders", value: "\(stats.total)")
+                    StatRow(title: "Active", value: "\(stats.active)")
+                    StatRow(title: "Completed", value: "\(stats.completed)")
+                    StatRow(title: "Overdue", value: "\(stats.overdue)")
+                    StatRow(title: "AI Enhanced", value: "\(stats.aiEnhanced)")
                 }
 
                 // About

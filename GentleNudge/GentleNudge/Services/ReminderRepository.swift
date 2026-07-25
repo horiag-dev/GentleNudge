@@ -703,11 +703,25 @@ actor ReminderRepository {
         var skipped = 0
         for raw in ids {
             guard let uuid = UUID(uuidString: raw) else { skipped += 1; continue }
-            let outcome = removeReminder(id: uuid)
+            let outcome = deleteReminderNoSave(id: uuid)
             if outcome.didDelete {
                 deletedTitles.append(outcome.title ?? "Reminder")
             } else {
                 skipped += 1
+            }
+        }
+        // One save for the whole confirmed batch (was one save + CloudKit push per
+        // item). Atomic: a failure rolls the whole batch back rather than leaving a
+        // partial delete.
+        if !deletedTitles.isEmpty {
+            do {
+                try modelContext.save()
+            } catch {
+                modelContext.rollback()
+                return BatchDeleteResult(
+                    content: "Couldn't delete those reminders — the change was rolled back. Please try again.",
+                    isError: true, deletedCount: 0, skippedCount: ids.count, sampleTitles: []
+                )
             }
         }
         let payload = BatchDeleteSuccess(
@@ -860,19 +874,28 @@ actor ReminderRepository {
         return (try? modelContext.fetch(descriptor))?.first
     }
 
-    private func removeReminder(id: UUID) -> (didDelete: Bool, title: String?) {
+    /// Deletes one reminder WITHOUT saving — the caller commits. Unwinds a spawned
+    /// recurring successor first, exactly like the single delete. `complete`/
+    /// `uncomplete` don't save, so no store write happens until the caller saves.
+    private func deleteReminderNoSave(id: UUID) -> (didDelete: Bool, title: String?) {
         guard let reminder = fetchReminder(id: id) else { return (false, nil) }
         let title = reminder.title
         if reminder.nextOccurrenceID != nil {
             reminder.uncomplete(in: modelContext)
         }
         modelContext.delete(reminder)
+        return (true, title)
+    }
+
+    private func removeReminder(id: UUID) -> (didDelete: Bool, title: String?) {
+        let outcome = deleteReminderNoSave(id: id)
+        guard outcome.didDelete else { return outcome }
         do {
             try modelContext.save()
-            return (true, title)
+            return outcome
         } catch {
             modelContext.rollback()
-            return (false, title)
+            return (false, outcome.title)
         }
     }
 

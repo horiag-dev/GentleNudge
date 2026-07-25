@@ -28,7 +28,10 @@ enum Constants {
     }
 
     static var isAPIKeyConfigured: Bool {
-        claudeAPIKey != "YOUR_CLAUDE_API_KEY_HERE" && !claudeAPIKey.isEmpty
+        // Read the Keychain once (each `claudeAPIKey` access is a SecItemCopyMatching);
+        // this is called from view bodies and per streamed request.
+        let key = claudeAPIKey
+        return key != apiKeyPlaceholder && !key.isEmpty
     }
 
     static let claudeAPIURL = "https://api.anthropic.com/v1/messages"

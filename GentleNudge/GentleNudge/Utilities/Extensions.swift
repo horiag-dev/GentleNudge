@@ -89,15 +89,20 @@ extension Date {
 
 // MARK: - String Extensions
 
+/// One shared link detector. Building an `NSDataDetector` compiles a regex, which
+/// is wasteful to repeat — notes URL extraction runs in view bodies on every
+/// render/keystroke. The detector is immutable, so sharing it is thread-safe.
+private let sharedLinkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
 extension String {
     var containsURL: Bool {
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let detector = sharedLinkDetector
         let matches = detector?.matches(in: self, options: [], range: NSRange(location: 0, length: self.utf16.count))
         return (matches?.count ?? 0) > 0
     }
 
     var extractedURLs: [URL] {
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let detector = sharedLinkDetector
         let matches = detector?.matches(in: self, options: [], range: NSRange(location: 0, length: self.utf16.count)) ?? []
         return matches.compactMap { match in
             guard let range = Range(match.range, in: self) else { return nil }
@@ -179,7 +184,7 @@ struct LinkedText: View {
         attributedString.foregroundColor = NSColor(foregroundStyle)
         #endif
 
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let detector = sharedLinkDetector
         let matches = detector?.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)) ?? []
 
         for match in matches {
