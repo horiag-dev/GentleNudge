@@ -55,6 +55,9 @@ struct SettingsView: View {
     @State private var backupAlertIsError = false
     @State private var editingMemory: UserMemory?
     @State private var showingClearMemoriesConfirmation = false
+    /// Collapsed by default so the saved-memory list isn't always sitting open
+    /// in Settings — the user expands it to review/manage what's remembered.
+    @State private var showMemories = false
 
     enum SyncStatus {
         case idle
@@ -375,39 +378,50 @@ struct SettingsView: View {
                     Text("The assistant speaks replies with OpenAI's neural voice (gpt-4o-mini-tts). The OpenAI key is used only for the spoken voice and is stored in your Keychain. Get one at platform.openai.com/api-keys. Without a key — or with Neural Voice off — it falls back to the built-in system voice.")
                 }
 
-                // Memory (the assistant's long-term facts about the user)
+                // Memory (the assistant's long-term facts about the user).
+                // The list is collapsed by default so it isn't always sitting
+                // open in Settings — expand "Saved memories" to review/manage it.
                 Section {
                     if memories.isEmpty {
                         Text("The assistant remembers things you tell it — like family names and preferences — and uses them to help you. Nothing saved yet.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(memories) { memory in
-                            Button {
-                                editingMemory = memory
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(memory.content)
-                                        .foregroundStyle(.primary)
-                                    Text(memory.kind.capitalized)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                        DisclosureGroup(isExpanded: $showMemories) {
+                            ForEach(memories) { memory in
+                                Button {
+                                    editingMemory = memory
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(memory.content)
+                                            .foregroundStyle(.primary)
+                                        Text(memory.kind.capitalized)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
-                        }
-                        .onDelete(perform: deleteMemories)
+                            .onDelete(perform: deleteMemories)
 
-                        Button(role: .destructive) {
-                            showingClearMemoriesConfirmation = true
+                            Button(role: .destructive) {
+                                showingClearMemoriesConfirmation = true
+                            } label: {
+                                Label("Clear All Memories", systemImage: "trash")
+                            }
                         } label: {
-                            Label("Clear All Memories", systemImage: "trash")
+                            HStack {
+                                Text("Saved memories")
+                                Spacer()
+                                Text("\(memories.count)")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 } header: {
                     Text("Memory")
                 } footer: {
-                    Text("Facts the assistant has learned about you. Tap one to edit it, or swipe to delete. Memories sync with iCloud like your reminders.")
+                    Text("Facts the assistant has learned about you. Tap to expand, then tap one to edit or delete it. Memories sync with iCloud like your reminders.")
                 }
 
                 // Statistics
@@ -1666,6 +1680,16 @@ struct MemoryEditSheet: View {
                         .lineLimit(2...6)
                 } footer: {
                     Text("Write the fact as a short standalone statement.")
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        modelContext.delete(memory)
+                        try? modelContext.save()
+                        dismiss()
+                    } label: {
+                        Label("Delete Memory", systemImage: "trash")
+                    }
                 }
             }
             .navigationTitle("Edit Memory")
