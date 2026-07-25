@@ -90,14 +90,10 @@ struct SettingsView: View {
         return (total, active, completed, overdue, aiEnhanced)
     }
 
-    /// "1.2.0 (2)" — the real marketing version + build number from the bundle
-    /// (which come from MARKETING_VERSION / CURRENT_PROJECT_VERSION at build
-    /// time), so this row always reflects the build actually installed.
+    /// The marketing version (e.g. "1.2.5") from the bundle — comes from
+    /// MARKETING_VERSION at build time. Just the version number, no build suffix.
     static var appVersionText: String {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
-        let build = info?["CFBundleVersion"] as? String ?? "—"
-        return "\(version) (\(build))"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
 
     // Friendly sync status for the About row, derived from the active storage
