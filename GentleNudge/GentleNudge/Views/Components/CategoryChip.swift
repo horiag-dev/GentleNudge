@@ -74,13 +74,16 @@ struct CategoryChipSelectable: View {
             }
             .font(.subheadline)
             .fontWeight(.medium)
-            .foregroundStyle(isSelected ? .white : category.color)
+            // Contrast-aware: near-black on light fills (yellow, mint, …),
+            // white on dark ones — white-on-yellow fails legibility.
+            .foregroundStyle(isSelected ? category.contrastingForeground : category.color)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(isSelected ? category.color : category.color.opacity(0.15))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

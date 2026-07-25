@@ -98,6 +98,8 @@ struct ChatView: View {
             .buttonStyle(.borderless)
             .disabled(coordinator.transcript.isEmpty && !coordinator.isRunning && coordinator.lastError == nil)
             .help("Start a new conversation")
+            // `.help` is a no-op for VoiceOver on iOS — name the button explicitly.
+            .accessibilityLabel("New chat")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -277,6 +279,7 @@ struct ChatView: View {
             .frame(width: 34, height: 34)
             .disabled(!canSend)
             .help("Send")
+            .accessibilityLabel("Send")
         }
     }
 

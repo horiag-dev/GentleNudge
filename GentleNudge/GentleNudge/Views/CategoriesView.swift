@@ -37,6 +37,7 @@ struct CategoriesView: View {
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
+                    .accessibilityLabel("New Category")
                 }
             }
             .sheet(isPresented: $showingAddCategory) {
@@ -56,10 +57,11 @@ struct CategoryCard: View {
 
     var body: some View {
         HStack(spacing: Constants.Spacing.md) {
-            // Icon
+            // Icon — contrast-aware foreground: near-black on light fills
+            // (yellow, mint, …), white on dark ones.
             Image(systemName: category.icon)
                 .font(.title2)
-                .foregroundStyle(.white)
+                .foregroundStyle(category.contrastingForeground)
                 .frame(width: 50, height: 50)
                 .background(category.color)
                 .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
@@ -82,6 +84,7 @@ struct CategoryCard: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Edit \(category.name)")
         }
         .padding()
         .background(AppColors.secondaryBackground)
@@ -110,7 +113,7 @@ struct EditCategoryView: View {
                     VStack {
                         Image(systemName: selectedIcon)
                             .font(.largeTitle)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Category.contrastingForeground(forColorName: selectedColor))
                             .frame(width: 80, height: 80)
                             .background(colorFromName(selectedColor))
                             .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.lg))
@@ -151,12 +154,16 @@ struct EditCategoryView: View {
                                         .overlay {
                                             if selectedColor == color {
                                                 Image(systemName: "checkmark")
-                                                    .foregroundStyle(.white)
+                                                    .foregroundStyle(Category.contrastingForeground(forColorName: color))
                                                     .fontWeight(.bold)
                                             }
                                         }
                                 }
                                 .buttonStyle(.plain)
+                                // Shape-only button: VoiceOver has nothing to read
+                                // without an explicit name.
+                                .accessibilityLabel(color.capitalized)
+                                .accessibilityAddTraits(selectedColor == color ? .isSelected : [])
                             }
                         }
                         .padding()
@@ -178,12 +185,15 @@ struct EditCategoryView: View {
                                 } label: {
                                     Image(systemName: icon)
                                         .font(.title3)
-                                        .foregroundStyle(selectedIcon == icon ? .white : .primary)
+                                        .foregroundStyle(selectedIcon == icon
+                                            ? Category.contrastingForeground(forColorName: selectedColor)
+                                            : .primary)
                                         .frame(width: 44, height: 44)
                                         .background(selectedIcon == icon ? colorFromName(selectedColor) : AppColors.tertiaryBackground)
                                         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityAddTraits(selectedIcon == icon ? .isSelected : [])
                             }
                         }
                         .padding()

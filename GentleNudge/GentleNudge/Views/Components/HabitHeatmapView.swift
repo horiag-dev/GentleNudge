@@ -91,7 +91,8 @@ struct HabitHeatmapView: View {
             // Last 8 weeks as a simple grid
             RecentWeeksGrid(habit: habit, weeks: 8)
 
-            // Legend
+            // Legend — decorative for VoiceOver (the grid already reads a
+            // summary), and scalable text instead of a fixed 10pt size.
             HStack {
                 Spacer()
                 HStack(spacing: 4) {
@@ -99,7 +100,7 @@ struct HabitHeatmapView: View {
                         .fill(Color.secondary.opacity(0.2))
                         .frame(width: 8, height: 8)
                     Text("Missed")
-                        .font(.system(size: 10))
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
 
                     Circle()
@@ -107,10 +108,11 @@ struct HabitHeatmapView: View {
                         .frame(width: 8, height: 8)
                         .padding(.leading, 8)
                     Text("Done")
-                        .font(.system(size: 10))
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
+            .accessibilityHidden(true)
         }
         .padding(Constants.Spacing.sm)
         .background(
@@ -140,7 +142,8 @@ struct StatBadge: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 Text(label)
-                    .font(.system(size: 9))
+                    // Scalable style instead of a fixed 9pt size (Dynamic Type).
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
@@ -182,6 +185,24 @@ struct RecentWeeksGrid: View {
         return grid
     }
 
+    /// VoiceOver summary of exactly what the grid draws (counted over the same
+    /// `gridData` cells), so the dozens of unlabeled dots read as one sentence
+    /// instead of dot-by-dot noise. Note: the grid always draws its own
+    /// `weeks` window, which can differ from the stats row above it.
+    private var accessibilitySummary: String {
+        var drawnDays = 0
+        var completedDays = 0
+        for week in gridData {
+            for case let date? in week {
+                drawnDays += 1
+                if habit.wasCompletedOn(date: date) {
+                    completedDays += 1
+                }
+            }
+        }
+        return "Habit history: done \(completedDays) of the last \(drawnDays) days"
+    }
+
     var body: some View {
         VStack(spacing: spacing) {
             // Day labels
@@ -213,6 +234,9 @@ struct RecentWeeksGrid: View {
                 }
             }
         }
+        // One summarizing element; the individual dots are never read.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
     }
 }
 
@@ -253,6 +277,7 @@ struct HabitHistoryEditor: View {
                         Image(systemName: "chevron.left")
                             .font(.title3)
                     }
+                    .accessibilityLabel("Previous month")
 
                     Spacer()
 
@@ -274,6 +299,7 @@ struct HabitHistoryEditor: View {
                         Image(systemName: "chevron.right")
                             .font(.title3)
                     }
+                    .accessibilityLabel("Next month")
                     .disabled(calendar.isDate(displayedMonth, equalTo: Date(), toGranularity: .month))
                 }
                 .padding()
@@ -431,6 +457,8 @@ struct CalendarDayButton: View {
         .buttonStyle(.plain)
         .disabled(isFuture)
         .opacity(isFuture ? 0.3 : 1)
+        // Reads as "July 14, done" instead of a bare day number.
+        .accessibilityLabel("\(date.formatted(.dateTime.month(.wide).day())), \(isCompleted ? "done" : "not done")")
     }
 
     private var backgroundColor: Color {
@@ -475,6 +503,12 @@ struct HabitMiniHeatmap: View {
         }.reversed()
     }
 
+    /// Same data the dots draw, as one VoiceOver sentence.
+    private var accessibilitySummary: String {
+        let completed = recentDates.filter { habit.wasCompletedOn(date: $0) }.count
+        return "Habit history: done \(completed) of the last \(days) days"
+    }
+
     var body: some View {
         HStack(spacing: spacing) {
             ForEach(recentDates, id: \.self) { date in
@@ -483,6 +517,9 @@ struct HabitMiniHeatmap: View {
                     .frame(width: squareSize, height: squareSize)
             }
         }
+        // One summarizing element; the 14 dots are never read one by one.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
     }
 }
 

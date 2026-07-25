@@ -125,6 +125,8 @@ struct VoiceModeView: View {
             }
             .buttonStyle(.plain)
             .help(synthesizer.voiceRepliesEnabled ? "Replies are spoken (tap to mute)" : "Replies muted (tap to unmute)")
+            // `.help` is a no-op for VoiceOver on iOS — name the button explicitly.
+            .accessibilityLabel(synthesizer.voiceRepliesEnabled ? "Mute spoken replies" : "Unmute spoken replies")
 
             Spacer()
 
@@ -139,6 +141,7 @@ struct VoiceModeView: View {
             }
             .buttonStyle(.plain)
             .help("End voice mode")
+            .accessibilityLabel("End voice mode")
         }
     }
 

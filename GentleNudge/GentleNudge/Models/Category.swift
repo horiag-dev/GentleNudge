@@ -52,6 +52,27 @@ final class Category: Identifiable {
         }
     }
 
+    /// Foreground that stays legible when this category's color is the FILL
+    /// behind text or icons: near-black on light hues (yellow, mint, …),
+    /// white on dark ones. White-on-yellow (the default "Today" category)
+    /// fails contrast badly, which is what this exists to prevent.
+    var contrastingForeground: Color {
+        Self.contrastingForeground(forColorName: colorName)
+    }
+
+    /// Perceived brightness (ITU-R BT.601: 0.299 R + 0.587 G + 0.114 B) of
+    /// each palette color, precomputed from the system colors' light-mode
+    /// sRGB values. The palette splits cleanly around 0.52: hues above the
+    /// threshold are too light for white content, so they take near-black.
+    static func contrastingForeground(forColorName name: String) -> Color {
+        let brightness: [String: Double] = [
+            "red": 0.46, "orange": 0.64, "yellow": 0.77, "green": 0.56,
+            "blue": 0.40, "purple": 0.49, "pink": 0.44, "teal": 0.55,
+            "indigo": 0.40, "mint": 0.54, "gray": 0.56,
+        ]
+        return (brightness[name] ?? 0.56) > 0.52 ? Color.black.opacity(0.85) : .white
+    }
+
     static var defaults: [Category] {
         [
             Category(name: "Habits", icon: "heart.circle.fill", colorName: "red", isDefault: true, sortOrder: 0, isHabitCategory: true),

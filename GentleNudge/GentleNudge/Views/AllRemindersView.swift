@@ -208,8 +208,11 @@ struct CompletedReminderRow: View {
                     Image(systemName: "arrow.uturn.backward.circle.fill")
                         .font(.title2)
                         .foregroundStyle(.orange)
+                        // ~44pt hit target without growing the visible icon.
+                        .contentShape(Rectangle().inset(by: -8))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Mark not done")
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(reminder.title)
@@ -240,9 +243,10 @@ struct CompletedReminderRow: View {
 
                 Spacer()
 
-                // Completed checkmark
+                // Completed checkmark (decorative — the row already says it)
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
+                    .accessibilityHidden(true)
             }
             .padding(.vertical, Constants.Spacing.xs)
             .padding(.horizontal, Constants.Spacing.sm)
@@ -390,8 +394,11 @@ struct RecurringReminderRow: View {
                 Image(systemName: "circle")
                     .font(.body)
                     .foregroundStyle(.secondary)
+                    // ~44pt hit target without growing the visible icon.
+                    .contentShape(Rectangle().inset(by: -12))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Mark complete")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(reminder.title)

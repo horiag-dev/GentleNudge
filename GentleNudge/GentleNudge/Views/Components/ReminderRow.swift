@@ -6,9 +6,34 @@ struct ReminderRow: View {
     @Bindable var reminder: Reminder
 
     @State private var isPressed = false
+    /// Accessibility-only "Open" path: the visual open is the NavigationLink
+    /// push, which a custom accessibility action can't trigger, so VoiceOver
+    /// gets the detail as a sheet instead (same pattern as the Today rows).
+    @State private var showingDetailSheet = false
 
     private var isMuted: Bool {
         reminder.isDistantRecurring
+    }
+
+    /// One-element VoiceOver summary for the combined row: title, then
+    /// due/overdue/in-progress/completed status.
+    private var accessibilityRowLabel: String {
+        var parts = [reminder.title]
+        if reminder.isCompleted {
+            parts.append("Completed")
+        } else {
+            if reminder.isDueToday {
+                parts.append("Due today")
+            } else if reminder.isOverdue {
+                parts.append("Overdue")
+            } else if let dueDate = reminder.dueDate {
+                parts.append("Due \(dueDate.formatted(date: .abbreviated, time: .omitted))")
+            }
+            if reminder.isInProgress {
+                parts.append("In progress")
+            }
+        }
+        return parts.joined(separator: ", ")
     }
 
     var body: some View {
@@ -37,9 +62,12 @@ struct ReminderRow: View {
                             ? Color.green
                             : (reminder.isInProgress ? Color.indigo : Color.secondary))
                         .contentTransition(.symbolEffect(.replace))
+                        // ~44pt hit target without growing the visible icon.
+                        .contentShape(Rectangle().inset(by: -12))
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 2)
+                .accessibilityLabel(reminder.isCompleted ? "Mark not done" : "Mark complete")
 
                 // Title and metadata
                 VStack(alignment: .leading, spacing: 3) {
@@ -156,6 +184,50 @@ struct ReminderRow: View {
                 )
             }
             .tint(.green)
+        }
+        // VoiceOver: one element per row (title + status), with every inner
+        // control re-exposed as a named action — combining otherwise leaves
+        // the toggle, context menu, and long-press unreachable.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityRowLabel)
+        // Deterministic default activation (double-tap): open the detail.
+        .accessibilityAction {
+            showingDetailSheet = true
+        }
+        .accessibilityActions {
+            Button(reminder.isCompleted ? "Mark not done" : "Complete") {
+                withAnimation(Constants.Animation.spring) {
+                    HapticManager.notification(reminder.isCompleted ? .warning : .success)
+                    if reminder.isCompleted {
+                        reminder.uncomplete(in: modelContext)
+                    } else {
+                        completeReminder()
+                    }
+                }
+            }
+            // Same guard as the context menu's in-progress toggle.
+            if !reminder.isCompleted && !reminder.isHabit {
+                Button(reminder.isInProgress ? "Mark not started" : "Mark In Progress") {
+                    withAnimation(Constants.Animation.spring) {
+                        HapticManager.impact(.light)
+                        reminder.setInProgress(!reminder.isInProgress)
+                    }
+                }
+            }
+            Button("Open") {
+                showingDetailSheet = true
+            }
+            Button("Delete", role: .destructive) {
+                withAnimation {
+                    modelContext.delete(reminder)
+                }
+            }
+        }
+        .sheet(isPresented: $showingDetailSheet) {
+            NavigationStack {
+                ReminderDetailView(reminder: reminder)
+            }
+            .presentationDetents([.medium, .large])
         }
     }
 

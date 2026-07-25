@@ -187,6 +187,7 @@ struct TodayView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
             }
         }
         .padding(.horizontal, Constants.Spacing.sm)
@@ -384,6 +385,8 @@ struct MorningBriefingCard: View {
                         Button(action: onDismiss) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.tertiary)
+                                // ~44pt hit target without growing the visible icon.
+                                .contentShape(Rectangle().inset(by: -12))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Dismiss briefing")
@@ -536,24 +539,42 @@ struct HabitRow: View {
         return streak
     }
 
+    /// One-element VoiceOver summary: title, today's status, streak, and the
+    /// same 14-day window the mini heatmap draws.
+    private var accessibilityRowLabel: String {
+        var parts = [habit.title, isCompletedToday ? "Done today" : "Not done today"]
+        if currentStreak > 0 {
+            parts.append("\(currentStreak) day streak")
+        }
+        parts.append("Done \(habit.completionCount(days: 14)) of the last 14 days")
+        return parts.joined(separator: ", ")
+    }
+
+    private func toggleDoneToday() {
+        withAnimation(Constants.Animation.spring) {
+            HapticManager.impact(.medium)
+            if isCompletedToday {
+                habit.clearHabitCompletion()
+            } else {
+                habit.markHabitDoneToday()
+            }
+        }
+    }
+
     var body: some View {
         HStack(spacing: Constants.Spacing.sm) {
             Button {
-                withAnimation(Constants.Animation.spring) {
-                    HapticManager.impact(.medium)
-                    if isCompletedToday {
-                        habit.clearHabitCompletion()
-                    } else {
-                        habit.markHabitDoneToday()
-                    }
-                }
+                toggleDoneToday()
             } label: {
                 Image(systemName: isCompletedToday ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(isCompletedToday ? .green : .secondary)
                     .contentTransition(.symbolEffect(.replace))
+                    // ~44pt hit target without growing the visible icon.
+                    .contentShape(Rectangle().inset(by: -10))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(isCompletedToday ? "Done today" : "Mark done today")
 
             Text(habit.title)
                 .font(.body)
@@ -586,6 +607,26 @@ struct HabitRow: View {
             HabitDetailSheet(habit: habit)
         }
         #endif
+        // VoiceOver: one element per row (title + status + history), with the
+        // toggle and detail-sheet tap re-exposed as named actions.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityRowLabel)
+        #if os(iOS)
+        // Deterministic default activation (double-tap): open the detail sheet.
+        .accessibilityAction {
+            showingHeatmap = true
+        }
+        #endif
+        .accessibilityActions {
+            Button(isCompletedToday ? "Mark not done today" : "Mark done today") {
+                toggleDoneToday()
+            }
+            #if os(iOS)
+            Button("Open habit details") {
+                showingHeatmap = true
+            }
+            #endif
+        }
     }
 }
 
@@ -658,18 +699,38 @@ struct UpcomingReminderRow: View {
         return "in \(days) days"
     }
 
+    /// One-element VoiceOver summary: title, due wording, in-progress state.
+    private var accessibilityRowLabel: String {
+        var parts = [reminder.title]
+        if reminder.isCompleted {
+            parts.append("Completed")
+        } else {
+            if !daysUntilText.isEmpty {
+                parts.append("Due \(daysUntilText.lowercased())")
+            }
+            if reminder.isInProgress {
+                parts.append("In progress")
+            }
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private func toggleCompletion() {
+        withAnimation(Constants.Animation.spring) {
+            HapticManager.impact(.medium)
+            if reminder.isCompleted {
+                reminder.uncomplete(in: modelContext)
+            } else {
+                completeReminder()
+            }
+        }
+    }
+
     var body: some View {
         HStack(spacing: Constants.Spacing.sm) {
             // Completion toggle
             Button {
-                withAnimation(Constants.Animation.spring) {
-                    HapticManager.impact(.medium)
-                    if reminder.isCompleted {
-                        reminder.uncomplete(in: modelContext)
-                    } else {
-                        completeReminder()
-                    }
-                }
+                toggleCompletion()
             } label: {
                 // In-progress reads at a glance: half-filled indigo circle.
                 // Tapping still completes, exactly as before.
@@ -680,8 +741,11 @@ struct UpcomingReminderRow: View {
                     .foregroundStyle(reminder.isCompleted
                         ? Color.green
                         : (reminder.isInProgress ? Color.indigo : Color.secondary))
+                    // ~44pt hit target without growing the visible icon.
+                    .contentShape(Rectangle().inset(by: -12))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(reminder.isCompleted ? "Mark not done" : "Mark complete")
 
             // Content
             VStack(alignment: .leading, spacing: 3) {
@@ -737,6 +801,32 @@ struct UpcomingReminderRow: View {
             }
             .presentationDetents([.medium, .large])
         }
+        // VoiceOver: one element per row, with the toggle, the (otherwise
+        // unreachable) long-press in-progress toggle, and the open tap all
+        // re-exposed as named actions.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityRowLabel)
+        // Deterministic default activation (double-tap): open the detail.
+        .accessibilityAction {
+            showingDetail = true
+        }
+        .accessibilityActions {
+            Button(reminder.isCompleted ? "Mark not done" : "Complete") {
+                toggleCompletion()
+            }
+            // Same guard as the long-press gesture.
+            if !reminder.isCompleted && !reminder.isHabit {
+                Button(reminder.isInProgress ? "Mark not started" : "Mark In Progress") {
+                    withAnimation(Constants.Animation.spring) {
+                        HapticManager.impact(.light)
+                        reminder.setInProgress(!reminder.isInProgress)
+                    }
+                }
+            }
+            Button("Open") {
+                showingDetail = true
+            }
+        }
     }
 
     private func completeReminder() {
@@ -751,18 +841,39 @@ struct NeedsAttentionRow: View {
     @Bindable var reminder: Reminder
     @State private var showingDetail = false
 
+    /// One-element VoiceOver summary: title, due/overdue wording (via the same
+    /// `dueText` the row draws), in-progress state.
+    private var accessibilityRowLabel: String {
+        var parts = [reminder.title]
+        if reminder.isCompleted {
+            parts.append("Completed")
+        } else {
+            if let dueDate = reminder.dueDate {
+                parts.append(dueText(dueDate))
+            }
+            if reminder.isInProgress {
+                parts.append("In progress")
+            }
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private func toggleCompletion() {
+        withAnimation(Constants.Animation.spring) {
+            HapticManager.impact(.medium)
+            if reminder.isCompleted {
+                reminder.uncomplete(in: modelContext)
+            } else {
+                completeReminder()
+            }
+        }
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: Constants.Spacing.xs) {
             // Completion toggle
             Button {
-                withAnimation(Constants.Animation.spring) {
-                    HapticManager.impact(.medium)
-                    if reminder.isCompleted {
-                        reminder.uncomplete(in: modelContext)
-                    } else {
-                        completeReminder()
-                    }
-                }
+                toggleCompletion()
             } label: {
                 // In-progress reads at a glance: half-filled indigo circle.
                 // Tapping still completes, exactly as before.
@@ -774,9 +885,12 @@ struct NeedsAttentionRow: View {
                         ? Color.green
                         : (reminder.isInProgress ? Color.indigo : Color.secondary))
                     .contentTransition(.symbolEffect(.replace))
+                    // ~44pt hit target without growing the visible icon.
+                    .contentShape(Rectangle().inset(by: -12))
             }
             .buttonStyle(.plain)
             .padding(.top, 2)
+            .accessibilityLabel(reminder.isCompleted ? "Mark not done" : "Mark complete")
 
             // Title and metadata
             VStack(alignment: .leading, spacing: 3) {
@@ -828,6 +942,32 @@ struct NeedsAttentionRow: View {
                 ReminderDetailView(reminder: reminder)
             }
             .presentationDetents([.medium, .large])
+        }
+        // VoiceOver: one element per row, with the toggle, the (otherwise
+        // unreachable) long-press in-progress toggle, and the open tap all
+        // re-exposed as named actions.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityRowLabel)
+        // Deterministic default activation (double-tap): open the detail.
+        .accessibilityAction {
+            showingDetail = true
+        }
+        .accessibilityActions {
+            Button(reminder.isCompleted ? "Mark not done" : "Complete") {
+                toggleCompletion()
+            }
+            // Same guard as the long-press gesture.
+            if !reminder.isCompleted && !reminder.isHabit {
+                Button(reminder.isInProgress ? "Mark not started" : "Mark In Progress") {
+                    withAnimation(Constants.Animation.spring) {
+                        HapticManager.impact(.light)
+                        reminder.setInProgress(!reminder.isInProgress)
+                    }
+                }
+            }
+            Button("Open") {
+                showingDetail = true
+            }
         }
     }
 

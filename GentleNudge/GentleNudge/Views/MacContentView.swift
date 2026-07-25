@@ -297,6 +297,7 @@ struct MacContentView: View {
                     Button { showingSettings = true } label: {
                         Image(systemName: "gear")
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
         } detail: {
@@ -318,6 +319,7 @@ struct MacContentView: View {
                         }
                         .buttonStyle(.plain)
                         .keyboardShortcut("n", modifiers: .command)
+                        .accessibilityLabel("New Reminder")
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
@@ -735,17 +737,51 @@ struct MacReminderRow: View {
         return streak
     }
 
+    /// One-element VoiceOver summary: title, then completion/due/in-progress
+    /// (or done-today + streak for habits).
+    private var accessibilityRowLabel: String {
+        var parts = [reminder.title]
+        if isHabit {
+            parts.append(isChecked ? "Done today" : "Not done today")
+            if currentStreak > 0 {
+                parts.append("\(currentStreak) day streak")
+            }
+        } else if isChecked {
+            parts.append("Completed")
+        } else {
+            if let dueDate = reminder.dueDate {
+                let text = formatDate(dueDate)
+                parts.append(reminder.isOverdue ? "Overdue, \(text)" : "Due \(text)")
+            }
+            if reminder.isInProgress {
+                parts.append("In progress")
+            }
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private var toggleAccessibilityName: String {
+        if isHabit {
+            return isChecked ? "Mark not done today" : "Mark done today"
+        }
+        return isChecked ? "Mark not done" : "Mark complete"
+    }
+
+    private func toggleCompletion() {
+        withAnimation(.spring(response: 0.3)) {
+            if isHabit {
+                reminder.isCompletedToday ? reminder.clearHabitCompletion() : reminder.markHabitDoneToday()
+            } else {
+                reminder.isCompleted ? reminder.uncomplete(in: modelContext) : completeReminder()
+            }
+        }
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // Checkbox
             Button {
-                withAnimation(.spring(response: 0.3)) {
-                    if isHabit {
-                        reminder.isCompletedToday ? reminder.clearHabitCompletion() : reminder.markHabitDoneToday()
-                    } else {
-                        reminder.isCompleted ? reminder.uncomplete(in: modelContext) : completeReminder()
-                    }
-                }
+                toggleCompletion()
             } label: {
                 // In-progress reads at a glance: half-filled indigo circle.
                 // Tapping still completes, exactly as before.
@@ -756,8 +792,11 @@ struct MacReminderRow: View {
                     .foregroundStyle(isChecked
                         ? Color.green
                         : (isInProgress ? Color.indigo : Color.secondary))
+                    // ~44pt hit target without growing the visible icon.
+                    .contentShape(Rectangle().inset(by: -10))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(toggleAccessibilityName)
 
             // Content
             VStack(alignment: .leading, spacing: 2) {
@@ -845,6 +884,31 @@ struct MacReminderRow: View {
             }
         }
         .opacity(isMuted ? 0.6 : 1.0)
+        // VoiceOver: one element per row, with the checkbox, the (otherwise
+        // unreachable) press-and-hold / right-click in-progress toggle, and
+        // the selection tap re-exposed as named actions.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityRowLabel)
+        // Deterministic default activation: same as clicking the row.
+        .accessibilityAction {
+            onTap()
+        }
+        .accessibilityActions {
+            Button(toggleAccessibilityName) {
+                toggleCompletion()
+            }
+            // Same guard as the press-and-hold and the right-click menu.
+            if !isHabit && !reminder.isCompleted {
+                Button(reminder.isInProgress ? "Mark Not Started" : "Mark In Progress") {
+                    withAnimation(.spring(response: 0.3)) {
+                        reminder.setInProgress(!reminder.isInProgress)
+                    }
+                }
+            }
+            Button(isSelected ? "Hide Details" : "Show Details") {
+                onTap()
+            }
+        }
     }
 
     private var isChecked: Bool {
@@ -928,6 +992,7 @@ struct MacReminderDetailPanel: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.escape, modifiers: [])
+                .accessibilityLabel("Close details")
             }
             .padding()
             .background(AppColors.secondaryBackground)
@@ -1133,10 +1198,13 @@ struct CategoryPill: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(isSelected ? category.color : category.color.opacity(0.15))
-            .foregroundStyle(isSelected ? .white : category.color)
+            // Contrast-aware: near-black on light fills (yellow, mint, …),
+            // white on dark ones — white-on-yellow fails legibility.
+            .foregroundStyle(isSelected ? category.contrastingForeground : category.color)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
