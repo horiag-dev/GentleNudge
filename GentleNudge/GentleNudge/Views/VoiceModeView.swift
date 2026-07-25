@@ -35,6 +35,14 @@ import SwiftData
 /// handler and fully tears the mic down. The `SpeechSynthesizer` is the SAME
 /// app-level instance `ContentView` owns, so the global mute + OpenAI-vs-Apple
 /// routing are shared and only one engine ever talks.
+///
+/// ## Confirmation gates in voice mode
+/// The coordinator's four approval hooks render their Approve/Cancel card only
+/// in `ChatView`, which this cover hides — a gated tool (delete, new category,
+/// big bulk complete) would suspend the turn on an invisible card forever. So
+/// while voice mode is up the hooks are swapped for auto-DECLINE closures (and
+/// restored on dismiss, with the same save/restore discipline as the reply
+/// handler): the tool reports "declined", and the model ends the turn aloud.
 struct VoiceModeView: View {
     @Environment(ChatCoordinator.self) private var coordinator
     @Environment(\.dismiss) private var dismiss
@@ -66,6 +74,20 @@ struct VoiceModeView: View {
     /// True once we've swapped in our own reply handler, so `end()` restores the
     /// saved one only when we actually took over (never clobbers on the no-key path).
     @State private var tookOverReply = false
+    /// The four confirmation-gate hooks that were installed before voice took
+    /// over, restored on dismiss. `ChatView`'s Approve/Cancel card is invisible
+    /// under this full-screen cover, so while voice mode is up gated tools
+    /// (category creation, deletes, big bulk completes) are AUTO-DECLINED —
+    /// the executor returns its "declined" result and the model finishes the
+    /// turn out loud instead of suspending on an unanswerable card forever.
+    @State private var savedCategoryApproval: (@Sendable (String) async -> Bool)?
+    @State private var savedDeletionApproval: (@Sendable (String) async -> Bool)?
+    @State private var savedBulkDeletionApproval: (@Sendable (Int, [String]) async -> Bool)?
+    @State private var savedBulkCompletionApproval: (@Sendable (Int, [String]) async -> Bool)?
+    /// True once we've swapped in the auto-decline hooks, so `end()` restores the
+    /// saved ones only when we actually took over (same discipline as
+    /// `tookOverReply` — the no-key early return never clobbers them).
+    @State private var tookOverApprovals = false
     /// Drives the orb's breathing animation.
     @State private var breathing = false
 
@@ -290,6 +312,21 @@ struct VoiceModeView: View {
         speech.onFinalTranscript = { text in finalTranscript(text) }
         tookOverReply = true
 
+        // Take over the confirmation gates too: their Approve/Cancel card lives
+        // in ChatView, which this cover hides, so a gated tool would suspend the
+        // turn forever. Auto-decline instead — the tool reports "declined" and
+        // the model wraps up the turn in speech. Saved + restored on dismiss,
+        // mirroring the reply-handler discipline above.
+        savedCategoryApproval = coordinator.categoryApprovalHook
+        savedDeletionApproval = coordinator.deletionApprovalHook
+        savedBulkDeletionApproval = coordinator.bulkDeletionApprovalHook
+        savedBulkCompletionApproval = coordinator.bulkCompletionApprovalHook
+        coordinator.categoryApprovalHook = { _ in false }
+        coordinator.deletionApprovalHook = { _ in false }
+        coordinator.bulkDeletionApprovalHook = { _, _ in false }
+        coordinator.bulkCompletionApprovalHook = { _, _ in false }
+        tookOverApprovals = true
+
         sessionActive = true
         startBreathing()
 
@@ -321,6 +358,18 @@ struct VoiceModeView: View {
         if tookOverReply {
             coordinator.onAssistantReply = savedReplyHandler
             tookOverReply = false
+        }
+        // Give ChatView its confirmation gates back (only if we swapped them).
+        if tookOverApprovals {
+            if let saved = savedCategoryApproval { coordinator.categoryApprovalHook = saved }
+            if let saved = savedDeletionApproval { coordinator.deletionApprovalHook = saved }
+            if let saved = savedBulkDeletionApproval { coordinator.bulkDeletionApprovalHook = saved }
+            if let saved = savedBulkCompletionApproval { coordinator.bulkCompletionApprovalHook = saved }
+            savedCategoryApproval = nil
+            savedDeletionApproval = nil
+            savedBulkDeletionApproval = nil
+            savedBulkCompletionApproval = nil
+            tookOverApprovals = false
         }
         // Release the one shared `.playAndRecord` session LAST, after both the
         // recognizer and the synthesizer are quiet. This view is the session's

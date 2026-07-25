@@ -126,4 +126,60 @@ final class Category: Identifiable {
         habits.isHabitCategory = true
         try? context.save()
     }
+
+    /// Merges duplicate categories (same trimmed, case-insensitive name), which
+    /// appear when two devices both seed the defaults before CloudKit finishes
+    /// its first import. For each duplicated name exactly ONE survivor is kept —
+    /// preferring the `isDefault` one, then the `isHabitCategory` one, then the
+    /// earliest by `sortOrder` (id as the final tiebreak, so every device
+    /// independently picks the SAME survivor and the merge converges). Every
+    /// reminder on a losing duplicate is reparented onto the survivor BEFORE the
+    /// duplicate is deleted, so no reminder ever loses its category; the habit
+    /// marker is preserved on the survivor if any duplicate carried it.
+    /// Idempotent and safe to run on every launch — a no-op when there are no
+    /// duplicates (nothing is written or saved).
+    @MainActor
+    @discardableResult
+    static func cleanDuplicates(in context: ModelContext) -> Int {
+        guard let categories = try? context.fetch(FetchDescriptor<Category>()) else { return 0 }
+
+        var groups: [String: [Category]] = [:]
+        for category in categories {
+            let key = category.name
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !key.isEmpty else { continue }
+            groups[key, default: []].append(category)
+        }
+
+        var removedCount = 0
+        for (_, duplicates) in groups where duplicates.count > 1 {
+            let ranked = duplicates.sorted { a, b in
+                if a.isDefault != b.isDefault { return a.isDefault }
+                if a.isHabitCategory != b.isHabitCategory { return a.isHabitCategory }
+                if a.sortOrder != b.sortOrder { return a.sortOrder < b.sortOrder }
+                return a.id.uuidString < b.id.uuidString
+            }
+            let survivor = ranked[0]
+            // Keep habit identity working even if only a losing copy was marked.
+            if !survivor.isHabitCategory, duplicates.contains(where: { $0.isHabitCategory }) {
+                survivor.isHabitCategory = true
+            }
+            for loser in ranked.dropFirst() {
+                // Copy the relationship before mutating it: reassigning
+                // `reminder.category` edits `loser.reminders` underneath us.
+                let orphans = loser.reminders ?? []
+                for reminder in orphans {
+                    reminder.category = survivor
+                }
+                context.delete(loser)
+                removedCount += 1
+            }
+        }
+
+        if removedCount > 0 {
+            try? context.save()
+        }
+        return removedCount
+    }
 }

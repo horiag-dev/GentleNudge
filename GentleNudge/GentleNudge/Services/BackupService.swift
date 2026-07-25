@@ -4,6 +4,46 @@ import SwiftData
 actor BackupService {
     static let shared = BackupService()
 
+    /// A `Sendable` capture of exactly the fields the backup serializes (mirrors
+    /// `MorningBriefingService.ReminderSummary`). Built ON the main actor at the
+    /// call sites, so this actor never reads live `@Model` properties (or walks
+    /// the `category` relationship fault) off the main thread while the UI may
+    /// be mutating them. The backup FILE format is unchanged — same JSON keys.
+    struct ReminderBackupSnapshot: Sendable {
+        let id: UUID
+        let title: String
+        let notes: String
+        let priorityRaw: Int
+        let isCompleted: Bool
+        let createdAt: Date
+        let recurrenceRaw: Int
+        let hasBeenSynced: Bool
+        let dueDate: Date?
+        let completedAt: Date?
+        let aiEnhancedDescription: String?
+        let appleSyncID: String?
+        let categoryName: String?
+        let habitCompletionDates: [Date]
+
+        @MainActor
+        init(_ reminder: Reminder) {
+            self.id = reminder.id
+            self.title = reminder.title
+            self.notes = reminder.notes
+            self.priorityRaw = reminder.priorityRaw
+            self.isCompleted = reminder.isCompleted
+            self.createdAt = reminder.createdAt
+            self.recurrenceRaw = reminder.recurrenceRaw
+            self.hasBeenSynced = reminder.hasBeenSynced
+            self.dueDate = reminder.dueDate
+            self.completedAt = reminder.completedAt
+            self.aiEnhancedDescription = reminder.aiEnhancedDescription
+            self.appleSyncID = reminder.appleSyncID
+            self.categoryName = reminder.category?.name
+            self.habitCompletionDates = reminder.habitCompletionDates
+        }
+    }
+
     private let backupFolderName = "Backups"
     private let maxBackupDays = 7
     private let fileManager = FileManager.default
@@ -27,7 +67,7 @@ actor BackupService {
         }
     }
 
-    func performDailyBackup(reminders: [Reminder]) async throws {
+    func performDailyBackup(reminders: [ReminderBackupSnapshot]) async throws {
         try ensureBackupDirectoryExists()
 
         guard let backupDir = backupDirectory else {
@@ -60,7 +100,7 @@ actor BackupService {
         print("Backup saved: \(todayFileName)")
     }
 
-    private func createBackupData(from reminders: [Reminder]) -> [[String: Any]] {
+    private func createBackupData(from reminders: [ReminderBackupSnapshot]) -> [[String: Any]] {
         var backupData: [[String: Any]] = []
 
         for reminder in reminders {
@@ -87,8 +127,8 @@ actor BackupService {
             if let appleSyncID = reminder.appleSyncID {
                 item["appleSyncID"] = appleSyncID
             }
-            if let category = reminder.category {
-                item["categoryName"] = category.name
+            if let categoryName = reminder.categoryName {
+                item["categoryName"] = categoryName
             }
 
             // Include habit completion dates for habit tracking history

@@ -16,7 +16,18 @@ struct ReminderDetailView: View {
     /// `commitTitle()` / `commitNotes()`.
     @State private var titleDraft = ""
     @State private var notesDraft = ""
+    /// Baselines = the last value each draft was loaded FROM the model with (or
+    /// committed back to it). A field is **dirty** — i.e. the user actually typed
+    /// in it — exactly when its draft differs from its baseline, so programmatic
+    /// loads/reloads never count as user edits. Only dirty fields are committed;
+    /// a clean field tracks external model changes (assistant rename, CloudKit
+    /// merge) instead of clobbering them with a stale draft on close.
+    @State private var titleBaseline = ""
+    @State private var notesBaseline = ""
     @FocusState private var focusedField: EditField?
+
+    private var titleIsDirty: Bool { titleDraft != titleBaseline }
+    private var notesIsDirty: Bool { notesDraft != notesBaseline }
 
     private enum EditField {
         case title
@@ -352,13 +363,32 @@ struct ReminderDetailView: View {
         #endif
         .onAppear {
             titleDraft = reminder.title
+            titleBaseline = reminder.title
             notesDraft = reminder.notes
+            notesBaseline = reminder.notes
             showingDatePicker = reminder.dueDate != nil && !isDateToday && !isDateTomorrow && !isDateWeekend
         }
         // Commit point: leaving a field writes its draft back to the model.
         .onChange(of: focusedField) { oldValue, _ in
             if oldValue == .title { commitTitle() }
             if oldValue == .notes { commitNotes() }
+        }
+        // The model changed underneath us (assistant rename, CloudKit merge).
+        // If the user hasn't touched the field, refresh the draft so the editor
+        // shows the new value — and so a later blur/disappear commit can't write
+        // the stale draft back over the external edit. A dirty field keeps the
+        // user's in-flight edit (their typing wins, committed as before).
+        .onChange(of: reminder.title) { _, newValue in
+            if !titleIsDirty {
+                titleDraft = newValue
+                titleBaseline = newValue
+            }
+        }
+        .onChange(of: reminder.notes) { _, newValue in
+            if !notesIsDirty {
+                notesDraft = newValue
+                notesBaseline = newValue
+            }
         }
         // Safety net: if the view is dismissed while a field still has focus
         // (no blur fired), commit here so no typed edit is ever lost.
@@ -381,17 +411,25 @@ struct ReminderDetailView: View {
         }
     }
 
-    /// Writes the title draft back to the model only when it actually changed,
-    /// so an untouched visit never dirties the store.
+    /// Writes the title draft back to the model only when the USER edited it
+    /// (draft differs from its baseline), then marks the field clean. An
+    /// untouched visit never dirties the store — and never reverts an external
+    /// edit (assistant rename, CloudKit merge) with a stale draft.
     private func commitTitle() {
-        guard !reminder.isDeleted, reminder.title != titleDraft else { return }
-        reminder.title = titleDraft
+        guard titleIsDirty, !reminder.isDeleted else { return }
+        if reminder.title != titleDraft {
+            reminder.title = titleDraft
+        }
+        titleBaseline = titleDraft
     }
 
-    /// Same commit-on-change rule for notes.
+    /// Same commit-only-when-dirty rule for notes.
     private func commitNotes() {
-        guard !reminder.isDeleted, reminder.notes != notesDraft else { return }
-        reminder.notes = notesDraft
+        guard notesIsDirty, !reminder.isDeleted else { return }
+        if reminder.notes != notesDraft {
+            reminder.notes = notesDraft
+        }
+        notesBaseline = notesDraft
     }
 
     private func polishWithAI() {
@@ -411,11 +449,13 @@ struct ReminderDetailView: View {
                 await MainActor.run {
                     withAnimation {
                         // Update title if it changed (typos fixed) — keep the
-                        // local draft in sync so a later blur/disappear commit
-                        // can't overwrite the polished title with stale text.
+                        // local draft (and its clean baseline) in sync so a later
+                        // blur/disappear commit can't overwrite the polished
+                        // title with stale text.
                         if polished.title != reminder.title {
                             reminder.title = polished.title
                             titleDraft = polished.title
+                            titleBaseline = polished.title
                         }
                         // Store link info if present
                         if let linkInfo = polished.linkInfo {

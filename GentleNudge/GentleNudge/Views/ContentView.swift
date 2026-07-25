@@ -140,9 +140,12 @@ struct ContentView: View {
         }
         #endif
         .task {
-            // Perform daily backup on app launch
+            // Perform daily backup on app launch. Snapshot the @Model fields on
+            // the main actor FIRST — the backup actor must never touch live
+            // models (or their category relationship) off the main thread.
+            let backupSnapshots = reminders.map(BackupService.ReminderBackupSnapshot.init)
             do {
-                try await BackupService.shared.performDailyBackup(reminders: reminders)
+                try await BackupService.shared.performDailyBackup(reminders: backupSnapshots)
             } catch {
                 print("Backup failed: \(error.localizedDescription)")
             }

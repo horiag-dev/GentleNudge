@@ -824,8 +824,11 @@ struct SettingsView: View {
 
     private func manualBackup() {
         Task {
+            // Snapshot the @Model fields on the main actor BEFORE hopping to the
+            // backup actor — it must never read live models off the main thread.
+            let backupSnapshots = reminders.map(BackupService.ReminderBackupSnapshot.init)
             do {
-                try await BackupService.shared.performDailyBackup(reminders: reminders)
+                try await BackupService.shared.performDailyBackup(reminders: backupSnapshots)
                 loadBackupList()
                 await MainActor.run {
                     backupAlertMessage = "Backup created successfully with \(reminders.count) reminders."
@@ -1015,33 +1018,9 @@ struct SettingsView: View {
     }
 
     private func cleanDuplicateCategories() {
-        var seenNames: Set<String> = []
-        var duplicatesToDelete: [Category] = []
-
-        // Sort by sortOrder to keep the original ones
-        let sortedCategories = categories.sorted { $0.sortOrder < $1.sortOrder }
-
-        for category in sortedCategories {
-            if seenNames.contains(category.name) {
-                // This is a duplicate - mark for deletion
-                duplicatesToDelete.append(category)
-            } else {
-                seenNames.insert(category.name)
-            }
-        }
-
-        // Delete duplicates
-        for duplicate in duplicatesToDelete {
-            // Move reminders to the original category first
-            if let originalCategory = categories.first(where: { $0.name == duplicate.name && !duplicatesToDelete.contains($0) }) {
-                for reminder in reminders where reminder.category?.id == duplicate.id {
-                    reminder.category = originalCategory
-                }
-            }
-            modelContext.delete(duplicate)
-        }
-
-        try? modelContext.save()
+        // Same idempotent merge the app runs on every launch: keeps one survivor
+        // per name and reparents every reminder onto it before deleting dupes.
+        Category.cleanDuplicates(in: modelContext)
         HapticManager.notification(.success)
     }
 

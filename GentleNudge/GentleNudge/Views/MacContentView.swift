@@ -968,15 +968,27 @@ struct MacReminderDetailPanel: View {
     /// to the `@Model`, so a keystroke doesn't invalidate every `@Query` in the
     /// app. The panel has no explicit Save, so drafts are committed back
     /// ~0.5s after the last keystroke (debounced), when the selected reminder
-    /// changes, and on disappear — no edit is ever dropped.
+    /// changes, and on disappear — no edit is ever dropped. Only fields the
+    /// user actually edited are committed (see the baselines below).
     @State private var titleDraft = ""
     @State private var notesDraft = ""
+    /// Baselines = the last value each draft was loaded FROM the model with (or
+    /// committed back to it). A field is **dirty** — i.e. the user actually typed
+    /// in it — exactly when its draft differs from its baseline, so programmatic
+    /// loads/reloads never count as user edits. Only dirty fields are committed;
+    /// a clean field tracks external model changes (assistant rename, CloudKit
+    /// merge) instead of clobbering them with a stale draft on close/switch.
+    @State private var titleBaseline = ""
+    @State private var notesBaseline = ""
     /// The reminder the drafts belong to. Kept separately from `reminder` so
     /// that when the selection switches (same view identity, new model), the
     /// pending edit still commits to the PREVIOUS reminder.
     @State private var draftTarget: Reminder?
     /// Pending debounced commit; cancelled and replaced on every keystroke.
     @State private var commitTask: Task<Void, Never>?
+
+    private var titleIsDirty: Bool { titleDraft != titleBaseline }
+    private var notesIsDirty: Bool { notesDraft != notesBaseline }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1028,7 +1040,10 @@ struct MacReminderDetailPanel: View {
                         TextField("Title", text: $titleDraft, axis: .vertical)
                             .textFieldStyle(.plain)
                             .font(.body)
-                            .onChange(of: titleDraft) { _, _ in scheduleCommit() }
+                            // Only a USER edit (draft differs from its baseline)
+                            // schedules a commit — programmatic reloads move the
+                            // baseline with the draft, so they never count.
+                            .onChange(of: titleDraft) { _, _ in if titleIsDirty { scheduleCommit() } }
                     }
 
                     // Notes
@@ -1037,7 +1052,7 @@ struct MacReminderDetailPanel: View {
                         TextField("Notes", text: $notesDraft, axis: .vertical)
                             .textFieldStyle(.plain)
                             .lineLimit(3...6)
-                            .onChange(of: notesDraft) { _, _ in scheduleCommit() }
+                            .onChange(of: notesDraft) { _, _ in if notesIsDirty { scheduleCommit() } }
                     }
 
                     Divider()
@@ -1142,6 +1157,22 @@ struct MacReminderDetailPanel: View {
             commitDrafts()
             loadDrafts()
         }
+        // The bound model changed underneath us (assistant rename, CloudKit
+        // merge). If the user hasn't touched the field, refresh the draft so the
+        // panel shows the new value — and so a later commit can't write the
+        // stale draft back over it. A dirty field keeps the user's in-flight
+        // edit. The `draftTarget` guard skips the selection-switch case, which
+        // the `reminder.id` handler above owns.
+        .onChange(of: reminder.title) { _, newValue in
+            guard draftTarget?.id == reminder.id, !titleIsDirty else { return }
+            titleDraft = newValue
+            titleBaseline = newValue
+        }
+        .onChange(of: reminder.notes) { _, newValue in
+            guard draftTarget?.id == reminder.id, !notesIsDirty else { return }
+            notesDraft = newValue
+            notesBaseline = newValue
+        }
         // Panel closed (or torn down): flush any pending debounced edit.
         .onDisappear {
             commitDrafts()
@@ -1155,7 +1186,9 @@ struct MacReminderDetailPanel: View {
 
     private func loadDrafts() {
         titleDraft = reminder.title
+        titleBaseline = reminder.title
         notesDraft = reminder.notes
+        notesBaseline = reminder.notes
         draftTarget = reminder
     }
 
@@ -1170,14 +1203,23 @@ struct MacReminderDetailPanel: View {
         }
     }
 
-    /// Writes the drafts back to the model they were loaded from, only when a
-    /// value actually changed (an untouched panel never dirties the store).
+    /// Writes the drafts back to the model they were loaded from — but ONLY the
+    /// fields the user actually edited (draft differs from its baseline). An
+    /// untouched panel never dirties the store, and a clean field can never
+    /// revert an external edit (assistant rename, CloudKit merge) with a stale
+    /// draft. Committing marks the field clean again.
     private func commitDrafts() {
         commitTask?.cancel()
         commitTask = nil
         guard let target = draftTarget, !target.isDeleted else { return }
-        if target.title != titleDraft { target.title = titleDraft }
-        if target.notes != notesDraft { target.notes = notesDraft }
+        if titleIsDirty {
+            if target.title != titleDraft { target.title = titleDraft }
+            titleBaseline = titleDraft
+        }
+        if notesIsDirty {
+            if target.notes != notesDraft { target.notes = notesDraft }
+            notesBaseline = notesDraft
+        }
     }
 }
 

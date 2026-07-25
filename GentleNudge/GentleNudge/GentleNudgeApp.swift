@@ -88,10 +88,13 @@ struct GentleNudgeApp: App {
                     try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
 
                     let descriptor = FetchDescriptor<Category>()
-                    let existingCategories = try? context.fetch(descriptor)
 
-                    // Only create defaults if still empty after sync delay
-                    if existingCategories?.isEmpty ?? true {
+                    // Only create defaults if the store is VERIFIED empty after
+                    // the sync delay. A throwing fetch must NOT seed — we can't
+                    // tell "empty" from "unreadable", and seeding blind is what
+                    // duplicates every category on a second device.
+                    if let existingCategories = try? context.fetch(descriptor),
+                       existingCategories.isEmpty {
                         for defaultCategory in Category.defaults {
                             context.insert(defaultCategory)
                         }
@@ -105,6 +108,12 @@ struct GentleNudgeApp: App {
                 // identity keys off the stable marker instead of a name match.
                 // Runs even for stores seeded before isHabitCategory existed.
                 Category.backfillHabitMarker(in: context)
+
+                // Self-heal duplicate categories (a second device seeding before
+                // CloudKit's first import lands, or an interrupted import): merge
+                // same-named categories into one, reparenting every reminder onto
+                // the survivor. Idempotent — a no-op on a clean store.
+                Category.cleanDuplicates(in: context)
             }
 
             return container
@@ -131,9 +140,11 @@ struct GentleNudgeApp: App {
                     let hasCreatedDefaults = UserDefaults.standard.bool(forKey: "hasCreatedDefaultCategories")
                     if !hasCreatedDefaults {
                         let descriptor = FetchDescriptor<Category>()
-                        let existingCategories = try? context.fetch(descriptor)
 
-                        if existingCategories?.isEmpty ?? true {
+                        // Seed only when the store is VERIFIED empty — a throwing
+                        // fetch must not seed (same rule as the CloudKit path).
+                        if let existingCategories = try? context.fetch(descriptor),
+                           existingCategories.isEmpty {
                             for defaultCategory in Category.defaults {
                                 context.insert(defaultCategory)
                             }
@@ -146,6 +157,10 @@ struct GentleNudgeApp: App {
                     // One-time backfill: mark a pre-existing "Habits" category
                     // (stores seeded before isHabitCategory existed). Idempotent.
                     Category.backfillHabitMarker(in: context)
+
+                    // Merge any duplicate categories left by an earlier double
+                    // seed, reparenting reminders onto the survivor. Idempotent.
+                    Category.cleanDuplicates(in: context)
                 }
 
                 return container

@@ -661,9 +661,11 @@ actor ReminderRepository {
     // MARK: Undo / Delete
 
     /// Removes a chat-created reminder through this isolated context (card
-    /// Undo/Delete path). If the reminder had been completed and spawned a
-    /// recurring successor, undo that first (`uncomplete(in:)`) so we never orphan
-    /// a pristine future occurrence. A no-op if the reminder has already vanished.
+    /// Undo/Delete path). Deletes ONLY the addressed reminder — never a spawned
+    /// recurring successor (that's the user's live future occurrence). The card's
+    /// Undo path can't leave one behind anyway: it only offers Undo while the
+    /// reminder is still pristine, and `ReminderSnapshot.matchesCreation` requires
+    /// `nextOccurrenceID == nil`. A no-op if the reminder has already vanished.
     @discardableResult
     func deleteReminder(id: UUID) -> Bool {
         removeReminder(id: id).didDelete
@@ -706,10 +708,10 @@ actor ReminderRepository {
     }
 
     /// Confirmed batch delete for `delete_reminders`, run only after the user
-    /// approves the single gate. Deletes each resolvable reminder (unwinding a
-    /// recurring successor, exactly as the single delete does); ids that don't
-    /// resolve or fail to save are skipped and counted rather than failing the
-    /// whole batch.
+    /// approves the single gate. Deletes each resolvable reminder (only the
+    /// addressed one — a spawned recurring successor survives, exactly as the
+    /// single delete behaves); ids that don't resolve or fail to save are
+    /// skipped and counted rather than failing the whole batch.
     func deleteReminders(ids: [String]) -> BatchDeleteResult {
         guard !ids.isEmpty else {
             return BatchDeleteResult(
@@ -892,19 +894,19 @@ actor ReminderRepository {
         return (try? modelContext.fetch(descriptor))?.first
     }
 
-    /// Deletes one reminder WITHOUT saving — the caller commits. Unwinds a spawned
-    /// recurring successor first, exactly like the single delete. `complete`/
-    /// `uncomplete` don't save, so no store write happens until the caller saves.
+    /// Deletes one reminder WITHOUT saving — the caller commits. Deliberately
+    /// touches ONLY the addressed reminder: a spawned recurring successor is the
+    /// user's live future occurrence and must survive its predecessor's deletion,
+    /// so no `uncomplete(in:)` unwind happens here.
     private func deleteReminderNoSave(id: UUID) -> (didDelete: Bool, title: String?) {
         guard let reminder = fetchReminder(id: id) else { return (false, nil) }
         let title = reminder.title
-        if reminder.nextOccurrenceID != nil {
-            reminder.uncomplete(in: modelContext)
-        }
         modelContext.delete(reminder)
         return (true, title)
     }
 
+    /// Single-item delete + save: `deleteReminderNoSave` (which never touches a
+    /// spawned recurring successor) followed by an immediate commit/rollback.
     private func removeReminder(id: UUID) -> (didDelete: Bool, title: String?) {
         let outcome = deleteReminderNoSave(id: id)
         guard outcome.didDelete else { return outcome }
