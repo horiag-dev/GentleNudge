@@ -319,8 +319,14 @@ actor ReminderRepository {
 
     // MARK: find_reminders
 
-    /// In-memory filter over all reminders (personal scale). Returns ≤20 rows plus
-    /// the full `total_matches`. Date bounds are inclusive: `due_to` is compared
+    /// Store-level filter for status + category (pushed into the fetch predicate so
+    /// completed items or other categories are never realized when not needed),
+    /// then an in-memory pass for the date/text/overdue filters. Returns ≤20 rows
+    /// plus the full `total_matches` (counted AFTER every filter — the predicate
+    /// only narrows to exactly the rows the old in-memory status/category checks
+    /// kept, so the count is unchanged). No `fetchLimit`: the 20-row cap stays a
+    /// `prefix(20)` on the sorted result so `total_matches` stays correct.
+    /// Date bounds are inclusive: `due_to` is compared
     /// against the START of the next day, so a reminder carrying a time-of-day
     /// (e.g. 9 AM from older data) still matches its due day.
     func findReminders(_ input: FindRemindersInput, timeZone: TimeZone) -> FindRemindersResult {
@@ -366,15 +372,27 @@ actor ReminderRepository {
         let hasDateBound = fromBound != nil || toBoundExclusive != nil
         let needle = input.query?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        let all = (try? modelContext.fetch(FetchDescriptor<Reminder>())) ?? []
-        let matches = all.filter { r in
-            switch status {
-            case "active": if r.isCompleted { return false }
-            case "completed": if !r.isCompleted { return false }
-            default: break
-            }
+        // Status + category are plain stored-field equalities, so they go into the
+        // fetch predicate ("any" + no category = unfiltered fetch, as before).
+        var descriptor = FetchDescriptor<Reminder>()
+        switch (status, categoryFilterID) {
+        case ("active", let catID?):
+            descriptor.predicate = #Predicate<Reminder> { !$0.isCompleted && $0.category?.id == catID }
+        case ("active", nil):
+            descriptor.predicate = #Predicate<Reminder> { !$0.isCompleted }
+        case ("completed", let catID?):
+            descriptor.predicate = #Predicate<Reminder> { $0.isCompleted && $0.category?.id == catID }
+        case ("completed", nil):
+            descriptor.predicate = #Predicate<Reminder> { $0.isCompleted }
+        case (_, let catID?):
+            descriptor.predicate = #Predicate<Reminder> { $0.category?.id == catID }
+        default:
+            break
+        }
+
+        let candidates = (try? modelContext.fetch(descriptor)) ?? []
+        let matches = candidates.filter { r in
             if input.overdueOnly, !r.isOverdue { return false }
-            if let categoryFilterID, r.category?.id != categoryFilterID { return false }
             if let needle, !needle.isEmpty {
                 let hay = (r.title + "\n" + r.notes).lowercased()
                 if !hay.contains(needle) { return false }

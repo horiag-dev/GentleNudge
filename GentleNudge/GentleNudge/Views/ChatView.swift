@@ -31,6 +31,15 @@ struct ChatView: View {
 
     private let bottomID = "chat-bottom-anchor"
 
+    /// Time-gate for the streaming follow-scroll: scrolling to bottom on EVERY
+    /// SSE delta forces a layout pass per token, so it's coalesced to ~10/sec.
+    /// A reference box (not plain `@State` mutation) so bumping the timestamp
+    /// doesn't itself invalidate the view.
+    private final class StreamScrollGate {
+        var lastScroll = Date.distantPast
+    }
+    @State private var streamScrollGate = StreamScrollGate()
+
     /// Categories a reminder can actually be filed under (excludes the habits
     /// category). Send is gated on at least one existing (§2.7).
     private var availableCategories: [Category] {
@@ -149,8 +158,16 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: coordinator.transcript.count) { _, _ in scrollToBottom(proxy) }
             .onChange(of: coordinator.isRunning) { _, _ in scrollToBottom(proxy) }
-            // Follow the streaming text without animating every token.
-            .onChange(of: coordinator.streamingText) { _, _ in proxy.scrollTo(bottomID, anchor: .bottom) }
+            // Follow the streaming text without animating — and without
+            // scrolling — on every token: coalesced to ~10/sec. The final
+            // position is guaranteed by the commit-to-transcript scroll
+            // (`transcript.count`) and the `isRunning` flip below/above.
+            .onChange(of: coordinator.streamingText) { _, _ in
+                let now = Date()
+                guard now.timeIntervalSince(streamScrollGate.lastScroll) >= 0.1 else { return }
+                streamScrollGate.lastScroll = now
+                proxy.scrollTo(bottomID, anchor: .bottom)
+            }
             .onChange(of: coordinator.activity) { _, _ in scrollToBottom(proxy) }
         }
     }

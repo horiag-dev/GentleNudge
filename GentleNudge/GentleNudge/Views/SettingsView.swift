@@ -37,7 +37,6 @@ struct SettingsView: View {
     @State private var isTestingNotification = false
     #endif
 
-    @State private var showingOnboarding = false
     @State private var showAdvancedSettings = false
     @AppStorage(Constants.DefaultsKeys.habitVisibility)
     private var habitVisibilityRaw = HabitVisibility.all.rawValue
@@ -130,26 +129,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // MARK: - Get Started (iOS only)
                 #if os(iOS)
-                Section {
-                    Button {
-                        showingOnboarding = true
-                    } label: {
-                        HStack {
-                            Label("Get Started Guide", systemImage: "book.fill")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                } header: {
-                    Text("Welcome")
-                } footer: {
-                    Text("New to Gentle Nudge? Learn how to use the app and set up your first habits and reminders.")
-                }
-
                 // MARK: - Morning Notification
                 Section {
                     Toggle(isOn: $notificationsEnabled) {
@@ -787,11 +767,6 @@ struct SettingsView: View {
             .sheet(isPresented: $showingImport) {
                 ImportRemindersView()
             }
-            #if os(iOS)
-            .sheet(isPresented: $showingOnboarding) {
-                OnboardingView()
-            }
-            #endif
             .alert("Migration Result", isPresented: $showingMigrationAlert) {
                 Button("OK") {}
             } message: {

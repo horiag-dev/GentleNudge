@@ -9,6 +9,20 @@ struct ReminderDetailView: View {
 
     @Bindable var reminder: Reminder
 
+    /// Local edit buffers: the text fields bind here instead of straight to the
+    /// `@Model`, so a keystroke re-renders only this view instead of
+    /// invalidating every `@Query` in the app (and churning autosave/CloudKit).
+    /// Committed back to the model on field blur and on disappear — see
+    /// `commitTitle()` / `commitNotes()`.
+    @State private var titleDraft = ""
+    @State private var notesDraft = ""
+    @FocusState private var focusedField: EditField?
+
+    private enum EditField {
+        case title
+        case notes
+    }
+
     @State private var isEnhancing = false
     @State private var showDeleteConfirmation = false
     @State private var showingDatePicker: Bool = false
@@ -96,7 +110,8 @@ struct ReminderDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    TextField("Title", text: $reminder.title, axis: .vertical)
+                    TextField("Title", text: $titleDraft, axis: .vertical)
+                        .focused($focusedField, equals: .title)
                         .font(.title3)
                         .lineLimit(3)
                         .padding()
@@ -110,16 +125,18 @@ struct ReminderDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    TextField("Add notes...", text: $reminder.notes, axis: .vertical)
+                    TextField("Add notes...", text: $notesDraft, axis: .vertical)
+                        .focused($focusedField, equals: .notes)
                         .lineLimit(5...10)
                         .padding()
                         .background(AppColors.secondaryBackground)
                         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
 
-                    // Show clickable links if notes contain URLs
-                    if !reminder.notes.extractedURLs.isEmpty {
+                    // Show clickable links if notes contain URLs (read from the
+                    // draft so links keep appearing live while typing).
+                    if !notesDraft.extractedURLs.isEmpty {
                         VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
-                            ForEach(reminder.notes.extractedURLs, id: \.absoluteString) { url in
+                            ForEach(notesDraft.extractedURLs, id: \.absoluteString) { url in
                                 Link(destination: url) {
                                     HStack {
                                         Image(systemName: "link")
@@ -334,7 +351,20 @@ struct ReminderDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .onAppear {
+            titleDraft = reminder.title
+            notesDraft = reminder.notes
             showingDatePicker = reminder.dueDate != nil && !isDateToday && !isDateTomorrow && !isDateWeekend
+        }
+        // Commit point: leaving a field writes its draft back to the model.
+        .onChange(of: focusedField) { oldValue, _ in
+            if oldValue == .title { commitTitle() }
+            if oldValue == .notes { commitNotes() }
+        }
+        // Safety net: if the view is dismissed while a field still has focus
+        // (no blur fired), commit here so no typed edit is ever lost.
+        .onDisappear {
+            commitTitle()
+            commitNotes()
         }
         .confirmationDialog("Delete Reminder", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
@@ -351,7 +381,23 @@ struct ReminderDetailView: View {
         }
     }
 
+    /// Writes the title draft back to the model only when it actually changed,
+    /// so an untouched visit never dirties the store.
+    private func commitTitle() {
+        guard !reminder.isDeleted, reminder.title != titleDraft else { return }
+        reminder.title = titleDraft
+    }
+
+    /// Same commit-on-change rule for notes.
+    private func commitNotes() {
+        guard !reminder.isDeleted, reminder.notes != notesDraft else { return }
+        reminder.notes = notesDraft
+    }
+
     private func polishWithAI() {
+        // Polish reads the model, so flush any in-flight (unblurred) edits first.
+        commitTitle()
+        commitNotes()
         guard !reminder.title.isEmpty else { return }
 
         isEnhancing = true
@@ -364,9 +410,12 @@ struct ReminderDetailView: View {
 
                 await MainActor.run {
                     withAnimation {
-                        // Update title if it changed (typos fixed)
+                        // Update title if it changed (typos fixed) — keep the
+                        // local draft in sync so a later blur/disappear commit
+                        // can't overwrite the polished title with stale text.
                         if polished.title != reminder.title {
                             reminder.title = polished.title
+                            titleDraft = polished.title
                         }
                         // Store link info if present
                         if let linkInfo = polished.linkInfo {

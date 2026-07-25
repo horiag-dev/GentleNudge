@@ -48,104 +48,139 @@ struct MacContentView: View {
         case category(Category)
     }
 
-    // MARK: - Computed Properties (same order as iOS TodayView)
+    // MARK: - Derived lists (same membership/order as iOS TodayView)
 
-    private var needsAttentionReminders: [Reminder] {
-        reminders.filter { reminder in
-            guard !reminder.isHabit, !reminder.isCompleted else { return false }
+    /// Every list the sidebar and content derive from the store. `body` builds
+    /// ONE instance per render (`makeDerivedLists()`) and threads it through,
+    /// so no derived list is ever filtered/sorted more than once per render.
+    /// The old per-list computed vars re-filtered + re-sorted the entire store
+    /// on every ACCESS — the Today view's per-category "not already in Needs
+    /// Attention" exclusion evaluated one of them inside a per-reminder filter
+    /// closure, making that section O(N²).
+    private struct DerivedLists {
+        /// Overdue/due-today, in-progress pinned first (Today + sidebar count).
+        var needsAttention: [Reminder] = []
+        /// The same set as ids, for O(1) exclusion in the per-category filters.
+        var needsAttentionIDs: Set<UUID> = []
+        /// Needs-attention grouped by category (category order, uncategorized last).
+        var needsAttentionByCategory: [(category: Category?, reminders: [Reminder])] = []
+        /// ALL active habits, title-sorted (Habits sidebar list is the
+        /// management/browse surface; visibility mode only governs Today).
+        var habits: [Reminder] = []
+        /// Habits surfaced on Today under the current visibility mode.
+        var visibleHabits: [Reminder] = []
+        var scheduled: [Reminder] = []
+        var allActive: [Reminder] = []
+        var recurring: [Reminder] = []
+        var completed: [Reminder] = []
+        /// Active, non-habit reminders per category id (in-progress pinned
+        /// first, store order otherwise) — sidebar counts + category lists.
+        var byCategory: [UUID: [Reminder]] = [:]
+        /// Non-"Habits" categories that have at least one active reminder
+        /// (habits included, matching the old membership test exactly).
+        var categoriesWithReminders: [Category] = []
+    }
+
+    /// Single pass over the store; each output keeps the exact membership rules
+    /// and sort comparators of the computed vars it replaced (Swift sorts are
+    /// stable, and the pass preserves store order, so ties break identically).
+    private func makeDerivedLists() -> DerivedLists {
+        var lists = DerivedLists()
+        var categoryIDsWithActive: Set<UUID> = []
+
+        for reminder in reminders {
+            if reminder.isCompleted {
+                lists.completed.append(reminder)
+                continue
+            }
+            if let categoryID = reminder.category?.id {
+                categoryIDsWithActive.insert(categoryID)
+            }
+            if reminder.isRecurring {
+                lists.recurring.append(reminder)
+            }
+            if reminder.isHabit {
+                lists.habits.append(reminder)
+                continue
+            }
+            lists.allActive.append(reminder)
+            if reminder.dueDate != nil {
+                lists.scheduled.append(reminder)
+            }
             // Only overdue or due today (not urgent-only items)
-            return reminder.isOverdue || reminder.isDueToday
+            if reminder.isOverdue || reminder.isDueToday {
+                lists.needsAttention.append(reminder)
+            }
+            if let categoryID = reminder.category?.id {
+                lists.byCategory[categoryID, default: []].append(reminder)
+            }
         }
-        .sorted { r1, r2 in
-            // In-progress pinned first, then the existing urgency order
+
+        // In-progress pinned first, then the existing urgency order
+        lists.needsAttention.sort { r1, r2 in
             if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
             if r1.isOverdue != r2.isOverdue { return r1.isOverdue }
             if r1.isDueToday != r2.isDueToday { return r1.isDueToday }
             return r1.priority.rawValue > r2.priority.rawValue
         }
-    }
+        lists.needsAttentionIDs = Set(lists.needsAttention.map(\.id))
 
-    // Needs attention grouped by category
-    private var needsAttentionByCategory: [(category: Category?, reminders: [Reminder])] {
-        var grouped: [UUID?: [Reminder]] = [:]
-        for reminder in needsAttentionReminders {
-            let key = reminder.category?.id
-            grouped[key, default: []].append(reminder)
+        lists.habits.sort { $0.title < $1.title }
+        lists.visibleHabits = lists.habits.filter { habitVisibility.shows($0) }
+
+        // In-progress pinned first, then soonest due date
+        lists.scheduled.sort { r1, r2 in
+            if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
+            return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
         }
 
-        var result: [(category: Category?, reminders: [Reminder])] = []
+        // Stable: in-progress rises to the top, everything else keeps its order
+        lists.allActive.sort { $0.isInProgress && !$1.isInProgress }
+
+        // In-progress first, then recurrence frequency (daily first), then
+        // next due date
+        lists.recurring.sort { r1, r2 in
+            if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
+            if r1.recurrence.sortOrder != r2.recurrence.sortOrder {
+                return r1.recurrence.sortOrder < r2.recurrence.sortOrder
+            }
+            return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
+        }
+
+        lists.completed.sort { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+
+        // Stable: in-progress rises to the top, everything else keeps its order
+        for key in lists.byCategory.keys {
+            lists.byCategory[key]?.sort { $0.isInProgress && !$1.isInProgress }
+        }
+
+        // Needs attention grouped by category
+        var grouped: [UUID?: [Reminder]] = [:]
+        for reminder in lists.needsAttention {
+            grouped[reminder.category?.id, default: []].append(reminder)
+        }
         for category in categories {
-            if let reminders = grouped[category.id], !reminders.isEmpty {
-                result.append((category: category, reminders: reminders))
+            if let group = grouped[category.id], !group.isEmpty {
+                lists.needsAttentionByCategory.append((category: category, reminders: group))
             }
         }
         if let uncategorized = grouped[nil], !uncategorized.isEmpty {
-            result.append((category: nil, reminders: uncategorized))
+            lists.needsAttentionByCategory.append((category: nil, reminders: uncategorized))
         }
-        return result
-    }
 
-    private var habitReminders: [Reminder] {
-        reminders.filter { $0.isHabit && !$0.isCompleted }
-            .sorted { $0.title < $1.title }
-    }
-
-    /// Habits surfaced on the Today view under the current visibility mode.
-    /// The dedicated Habits sidebar list intentionally keeps showing ALL
-    /// habits (`habitReminders`) — it's the management/browse surface; the
-    /// mode only governs Today surfacing.
-    private var visibleHabits: [Reminder] {
-        habitReminders.filter { habitVisibility.shows($0) }
-    }
-
-    private var scheduledReminders: [Reminder] {
-        reminders.filter { !$0.isCompleted && !$0.isHabit && $0.dueDate != nil }
-            .sorted { r1, r2 in
-                // In-progress pinned first, then soonest due date
-                if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
-                return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
-            }
-    }
-
-    private var allActiveReminders: [Reminder] {
-        reminders.filter { !$0.isCompleted && !$0.isHabit }
-            // Stable: in-progress rises to the top, everything else keeps its order
-            .sorted { $0.isInProgress && !$1.isInProgress }
-    }
-
-    private var recurringReminders: [Reminder] {
-        reminders.filter { $0.isRecurring && !$0.isCompleted }
-            .sorted { r1, r2 in
-                // In-progress first, then recurrence frequency (daily first),
-                // then next due date
-                if r1.isInProgress != r2.isInProgress { return r1.isInProgress }
-                if r1.recurrence.sortOrder != r2.recurrence.sortOrder {
-                    return r1.recurrence.sortOrder < r2.recurrence.sortOrder
-                }
-                return (r1.dueDate ?? .distantFuture) < (r2.dueDate ?? .distantFuture)
-            }
-    }
-
-    private var completedReminders: [Reminder] {
-        reminders.filter { $0.isCompleted }
-            .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
-    }
-
-    private func remindersForCategory(_ category: Category) -> [Reminder] {
-        reminders.filter { $0.category?.id == category.id && !$0.isCompleted && !$0.isHabit }
-            // Stable: in-progress rises to the top, everything else keeps its order
-            .sorted { $0.isInProgress && !$1.isInProgress }
-    }
-
-    private var categoriesWithReminders: [Category] {
-        categories.filter { cat in
-            cat.name != "Habits" && reminders.contains { $0.category?.id == cat.id && !$0.isCompleted }
+        lists.categoriesWithReminders = categories.filter {
+            $0.name != "Habits" && categoryIDsWithActive.contains($0.id)
         }
+        return lists
     }
 
     // MARK: - Body
 
     var body: some View {
+        // ONE snapshot of every derived list per render — sidebar counts and
+        // both content lists all read from it (mirrors TodayView's
+        // `let data = categorizedReminders` pattern).
+        let lists = makeDerivedLists()
         NavigationSplitView {
             // MARK: Sidebar
             VStack(spacing: 0) {
@@ -168,7 +203,7 @@ struct MacContentView: View {
                         icon: "calendar.circle.fill",
                         color: .blue,
                         title: "Today",
-                        count: needsAttentionReminders.count,
+                        count: lists.needsAttention.count,
                         isSelected: selectedSidebarItem == .today
                     ) { selectedSidebarItem = .today }
 
@@ -176,7 +211,7 @@ struct MacContentView: View {
                         icon: "calendar.badge.clock",
                         color: .red,
                         title: "Scheduled",
-                        count: scheduledReminders.count,
+                        count: lists.scheduled.count,
                         isSelected: selectedSidebarItem == .scheduled
                     ) { selectedSidebarItem = .scheduled }
 
@@ -184,7 +219,7 @@ struct MacContentView: View {
                         icon: "tray.circle.fill",
                         color: .gray,
                         title: "All",
-                        count: allActiveReminders.count,
+                        count: lists.allActive.count,
                         isSelected: selectedSidebarItem == .all
                     ) { selectedSidebarItem = .all }
 
@@ -192,7 +227,7 @@ struct MacContentView: View {
                         icon: "arrow.trianglehead.2.clockwise.rotate.90.circle.fill",
                         color: .orange,
                         title: "Recurring",
-                        count: recurringReminders.count,
+                        count: lists.recurring.count,
                         isSelected: selectedSidebarItem == .recurring
                     ) { selectedSidebarItem = .recurring }
 
@@ -201,7 +236,7 @@ struct MacContentView: View {
                             icon: "leaf.circle.fill",
                             color: .teal,
                             title: "Habits",
-                            count: habitReminders.count,
+                            count: lists.habits.count,
                             isSelected: selectedSidebarItem == .habits
                         ) { selectedSidebarItem = .habits }
                     }
@@ -210,7 +245,7 @@ struct MacContentView: View {
                         icon: "checkmark.circle.fill",
                         color: .gray,
                         title: "Completed",
-                        count: completedReminders.count,
+                        count: lists.completed.count,
                         isSelected: selectedSidebarItem == .completed
                     ) { selectedSidebarItem = .completed }
                 }
@@ -227,7 +262,7 @@ struct MacContentView: View {
                                 HStack {
                                     Text(category.name)
                                     Spacer()
-                                    Text("\(remindersForCategory(category).count)")
+                                    Text("\(lists.byCategory[category.id]?.count ?? 0)")
                                         .foregroundStyle(.secondary)
                                         .font(.callout)
                                 }
@@ -290,9 +325,9 @@ struct MacContentView: View {
 
                     // Reminder List - same structure as iOS TodayView
                     if selectedSidebarItem == .today {
-                        todayListView
+                        todayListView(lists)
                     } else {
-                        standardListView
+                        standardListView(lists)
                     }
                 }
                 .frame(minWidth: 400)
@@ -338,7 +373,7 @@ struct MacContentView: View {
 
     // MARK: - Today List View (matches iOS TodayView order)
 
-    private var todayListView: some View {
+    private func todayListView(_ lists: DerivedLists) -> some View {
         ScrollView {
             LazyVStack(spacing: 16) {
                 // AI morning briefing (once per day, dismissible)
@@ -347,9 +382,9 @@ struct MacContentView: View {
                 }
 
                 // All-clear state
-                if visibleHabits.isEmpty
-                    && needsAttentionReminders.isEmpty
-                    && categoriesWithReminders.isEmpty {
+                if lists.visibleHabits.isEmpty
+                    && lists.needsAttention.isEmpty
+                    && lists.categoriesWithReminders.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "checkmark.circle")
                             .font(.system(size: 48))
@@ -362,10 +397,10 @@ struct MacContentView: View {
                 }
 
                 // Habits Section
-                if !visibleHabits.isEmpty {
+                if !lists.visibleHabits.isEmpty {
                     MacSectionCard(title: "Habits", icon: "leaf.circle.fill", color: .teal) {
                         // Progress bar
-                        let completed = visibleHabits.filter { $0.isCompletedToday }.count
+                        let completed = lists.visibleHabits.filter { $0.isCompletedToday }.count
                         VStack(spacing: 8) {
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
@@ -373,12 +408,12 @@ struct MacContentView: View {
                                         .fill(Color.teal.opacity(0.2))
                                     RoundedRectangle(cornerRadius: 3)
                                         .fill(Color.teal)
-                                        .frame(width: geo.size.width * CGFloat(completed) / CGFloat(max(visibleHabits.count, 1)))
+                                        .frame(width: geo.size.width * CGFloat(completed) / CGFloat(max(lists.visibleHabits.count, 1)))
                                 }
                             }
                             .frame(height: 6)
 
-                            ForEach(visibleHabits) { habit in
+                            ForEach(lists.visibleHabits) { habit in
                                 MacReminderRow(reminder: habit, isHabit: true, isSelected: selectedReminder?.id == habit.id) {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         selectedReminder = selectedReminder?.id == habit.id ? nil : habit
@@ -390,10 +425,10 @@ struct MacContentView: View {
                 }
 
                 // Needs Attention Section - grouped by category
-                if !needsAttentionReminders.isEmpty {
+                if !lists.needsAttention.isEmpty {
                     MacSectionCard(title: "Needs Attention", icon: "exclamationmark.circle.fill", color: .red) {
                         VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(needsAttentionByCategory.enumerated()), id: \.offset) { _, group in
+                            ForEach(Array(lists.needsAttentionByCategory.enumerated()), id: \.offset) { _, group in
                                 // Category header
                                 if let category = group.category {
                                     HStack(spacing: 4) {
@@ -428,9 +463,11 @@ struct MacContentView: View {
                 }
 
                 // Category Sections
-                ForEach(categoriesWithReminders) { category in
-                    let categoryReminders = remindersForCategory(category).filter { r in
-                        !needsAttentionReminders.contains { $0.id == r.id }
+                ForEach(lists.categoriesWithReminders) { category in
+                    // O(1) set-membership exclusion (this used to re-evaluate the
+                    // full filtered+sorted needs-attention list per reminder).
+                    let categoryReminders = (lists.byCategory[category.id] ?? []).filter { r in
+                        !lists.needsAttentionIDs.contains(r.id)
                     }
                     let activeReminders = categoryReminders.filter { !$0.isDistantRecurring }
                     let upcomingRecurring = categoryReminders.filter { $0.isDistantRecurring }
@@ -482,9 +519,12 @@ struct MacContentView: View {
 
     // MARK: - Standard List View
 
-    private var standardListView: some View {
-        List(selection: $selectedReminder) {
-            ForEach(displayedReminders) { reminder in
+    private func standardListView(_ lists: DerivedLists) -> some View {
+        // Bound once per render (was a computed var evaluated twice per body:
+        // once for the ForEach and again for the empty-state overlay).
+        let displayed = displayedReminders(lists)
+        return List(selection: $selectedReminder) {
+            ForEach(displayed) { reminder in
                 MacReminderRow(reminder: reminder, isHabit: selectedSidebarItem == .habits, isSelected: selectedReminder?.id == reminder.id) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         selectedReminder = selectedReminder?.id == reminder.id ? nil : reminder
@@ -493,36 +533,38 @@ struct MacContentView: View {
                 .tag(reminder)
                 .listRowSeparator(.visible)
             }
-            .onDelete(perform: deleteReminders)
+            .onDelete { offsets in
+                deleteReminders(at: offsets, from: displayed)
+            }
         }
         .listStyle(.plain)
         .overlay {
-            if displayedReminders.isEmpty {
+            if displayed.isEmpty {
                 emptyStateView
             }
         }
     }
 
-    private var displayedReminders: [Reminder] {
+    private func displayedReminders(_ lists: DerivedLists) -> [Reminder] {
         switch selectedSidebarItem {
         case .chat:
             return []
         case .today:
-            return needsAttentionReminders
+            return lists.needsAttention
         case .scheduled:
-            return scheduledReminders
+            return lists.scheduled
         case .all:
-            return allActiveReminders
+            return lists.allActive
         case .recurring:
-            return recurringReminders
+            return lists.recurring
         case .completed:
-            return completedReminders
+            return lists.completed
         case .habits:
             // The Habits list is the management surface: it shows ALL habits
             // (not just the focus selection); only "Hide habits" empties it.
-            return habitVisibility == .none ? [] : habitReminders
+            return habitVisibility == .none ? [] : lists.habits
         case .category(let cat):
-            return remindersForCategory(cat)
+            return lists.byCategory[cat.id] ?? []
         case .none:
             return []
         }
@@ -584,9 +626,9 @@ struct MacContentView: View {
         }
     }
 
-    private func deleteReminders(at offsets: IndexSet) {
+    private func deleteReminders(at offsets: IndexSet, from displayed: [Reminder]) {
         for index in offsets {
-            modelContext.delete(displayedReminders[index])
+            modelContext.delete(displayed[index])
         }
     }
 }
@@ -858,6 +900,20 @@ struct MacReminderDetailPanel: View {
     @State private var showDeleteConfirmation = false
     @State private var isEnhancing = false
 
+    /// Local edit buffers: the title/notes fields bind here instead of straight
+    /// to the `@Model`, so a keystroke doesn't invalidate every `@Query` in the
+    /// app. The panel has no explicit Save, so drafts are committed back
+    /// ~0.5s after the last keystroke (debounced), when the selected reminder
+    /// changes, and on disappear — no edit is ever dropped.
+    @State private var titleDraft = ""
+    @State private var notesDraft = ""
+    /// The reminder the drafts belong to. Kept separately from `reminder` so
+    /// that when the selection switches (same view identity, new model), the
+    /// pending edit still commits to the PREVIOUS reminder.
+    @State private var draftTarget: Reminder?
+    /// Pending debounced commit; cancelled and replaced on every keystroke.
+    @State private var commitTask: Task<Void, Never>?
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -904,17 +960,19 @@ struct MacReminderDetailPanel: View {
                     // Title
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Title").font(.caption).foregroundStyle(.secondary)
-                        TextField("Title", text: $reminder.title, axis: .vertical)
+                        TextField("Title", text: $titleDraft, axis: .vertical)
                             .textFieldStyle(.plain)
                             .font(.body)
+                            .onChange(of: titleDraft) { _, _ in scheduleCommit() }
                     }
 
                     // Notes
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Notes").font(.caption).foregroundStyle(.secondary)
-                        TextField("Notes", text: $reminder.notes, axis: .vertical)
+                        TextField("Notes", text: $notesDraft, axis: .vertical)
                             .textFieldStyle(.plain)
                             .lineLimit(3...6)
+                            .onChange(of: notesDraft) { _, _ in scheduleCommit() }
                     }
 
                     Divider()
@@ -1010,9 +1068,51 @@ struct MacReminderDetailPanel: View {
             }
         }
         .background(AppColors.background)
+        .onAppear {
+            loadDrafts()
+        }
+        // Same view identity, new model: commit the pending edit to the
+        // PREVIOUS reminder (still held by `draftTarget`), then rebind.
+        .onChange(of: reminder.id) { _, _ in
+            commitDrafts()
+            loadDrafts()
+        }
+        // Panel closed (or torn down): flush any pending debounced edit.
+        .onDisappear {
+            commitDrafts()
+        }
         .confirmationDialog("Delete?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) { modelContext.delete(reminder); onClose() }
         }
+    }
+
+    // MARK: Draft commit plumbing
+
+    private func loadDrafts() {
+        titleDraft = reminder.title
+        notesDraft = reminder.notes
+        draftTarget = reminder
+    }
+
+    /// Debounce: commit ~0.5s after the last keystroke. Each keystroke cancels
+    /// and supersedes the pending task.
+    private func scheduleCommit() {
+        commitTask?.cancel()
+        commitTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            commitDrafts()
+        }
+    }
+
+    /// Writes the drafts back to the model they were loaded from, only when a
+    /// value actually changed (an untouched panel never dirties the store).
+    private func commitDrafts() {
+        commitTask?.cancel()
+        commitTask = nil
+        guard let target = draftTarget, !target.isDeleted else { return }
+        if target.title != titleDraft { target.title = titleDraft }
+        if target.notes != notesDraft { target.notes = notesDraft }
     }
 }
 

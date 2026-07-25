@@ -26,7 +26,6 @@ struct ContentView: View {
 
     /// Today = 0, Assistant = 1, Settings = 2. (Voice is not a tab.)
     @State private var selectedTab = 0
-    @State private var showingOnboarding = false
 
     /// Bumped whenever the Assistant tab becomes active so `ChatView` can raise
     /// the keyboard. Driven from here (not `ChatView.onAppear`) because a
@@ -45,7 +44,6 @@ struct ContentView: View {
     @State private var keyboardVisible = false
     #endif
 
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var notificationUpdateTask: Task<Void, Never>?
 
     private var needsAttentionItems: [Reminder] {
@@ -139,15 +137,6 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             withAnimation(.easeOut(duration: 0.2)) { keyboardVisible = false }
-        }
-        .sheet(isPresented: $showingOnboarding) {
-            OnboardingView()
-        }
-        .onAppear {
-            // Show onboarding for first-time users
-            if !hasCompletedOnboarding {
-                showingOnboarding = true
-            }
         }
         #endif
         .task {

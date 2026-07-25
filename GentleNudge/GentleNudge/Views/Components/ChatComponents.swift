@@ -117,12 +117,17 @@ struct ChatNoticeBubble: View {
 /// The assistant's text as it streams in, token by token. Mirrors
 /// `ChatAssistantBubble`'s styling so the handoff to the committed transcript
 /// item is seamless when the message completes.
+///
+/// While streaming the text renders PLAIN (no markdown parse): re-running
+/// `AttributedString(markdown:)` over the whole accumulated text on every
+/// delta is O(len²) across a reply. The committed `ChatAssistantBubble`
+/// parses markdown once on completion, so the final render is unchanged.
 struct ChatStreamingBubble: View {
     let text: String
 
     var body: some View {
         HStack {
-            Text(ChatAssistantBubble.markdown(text))
+            Text(text)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(AppColors.secondaryBackground)
