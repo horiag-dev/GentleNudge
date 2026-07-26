@@ -639,7 +639,11 @@ struct HabitDetailSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: Constants.Spacing.lg) {
-                    HabitHeatmapView(habit: habit, weeks: 16)
+                    // 8 weeks: the stats row and the drawn grid share this one
+                    // window (the grid used to draw 8 weeks while the stats
+                    // counted 16, so "done X of 112 days" didn't describe the
+                    // visible grid). 8 keeps the sheet's compact heatmap size.
+                    HabitHeatmapView(habit: habit, weeks: 8)
 
                     // Stats
                     VStack(spacing: Constants.Spacing.sm) {

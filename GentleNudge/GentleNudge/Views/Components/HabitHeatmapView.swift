@@ -88,8 +88,11 @@ struct HabitHeatmapView: View {
                 )
             }
 
-            // Last 8 weeks as a simple grid
-            RecentWeeksGrid(habit: habit, weeks: 8)
+            // Drawn grid — the SAME `weeks` window the stats above count, so
+            // "done X of Y days" always describes exactly what's visible
+            // (the grid used to be hardcoded to 8 weeks while the stats
+            // counted the full window).
+            RecentWeeksGrid(habit: habit, weeks: weeks)
 
             // Legend — decorative for VoiceOver (the grid already reads a
             // summary), and scalable text instead of a fixed 10pt size.
@@ -187,8 +190,8 @@ struct RecentWeeksGrid: View {
 
     /// VoiceOver summary of exactly what the grid draws (counted over the same
     /// `gridData` cells), so the dozens of unlabeled dots read as one sentence
-    /// instead of dot-by-dot noise. Note: the grid always draws its own
-    /// `weeks` window, which can differ from the stats row above it.
+    /// instead of dot-by-dot noise. `HabitHeatmapView` passes its own `weeks`
+    /// down, so this matches the stats row above the grid.
     private var accessibilitySummary: String {
         var drawnDays = 0
         var completedDays = 0

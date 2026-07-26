@@ -32,6 +32,10 @@ struct ContentView: View {
     /// `TabView` doesn't reliably re-fire a child's `onAppear` on every switch.
     @State private var assistantFocusTrigger = 0
 
+    /// Per-launch dismissal of the in-memory data-loss banner (deliberately not
+    /// persisted — the warning must return on every launch while it applies).
+    @State private var storageWarningDismissed = false
+
     /// The one TTS engine, owned at the root (it used to live in `ChatView`) so
     /// the promoted Voice entry can hand it to `VoiceModeView`: mute state and
     /// the OpenAI-vs-Apple routing stay global, and only one engine ever speaks.
@@ -111,6 +115,15 @@ struct ContentView: View {
         // and defers the focus set so it reliably raises the keyboard.
         .onChange(of: selectedTab) { _, newTab in
             if newTab == 1 { assistantFocusTrigger += 1 }
+        }
+        // In-memory fallback = silent data loss. A Settings row alone isn't a
+        // signal anyone sees, so surface a persistent (dismissible-per-launch)
+        // banner above whatever tab is showing. The storage mode is fixed at
+        // launch, so a plain read is enough.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if AppState.shared.storageMode == .memory && !storageWarningDismissed {
+                StorageWarningBanner(dismissed: $storageWarningDismissed)
+            }
         }
         #if os(iOS)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -274,6 +287,44 @@ private extension ContentView {
     }
 }
 #endif
+
+// MARK: - Storage warning banner (shared iOS + macOS)
+
+/// Persistent warning shown at the top of the main content whenever the store
+/// fell back to in-memory storage (`AppState.shared.storageMode == .memory`):
+/// nothing done this launch survives a quit, and the only other signal was a
+/// buried Settings row. Dismissible per launch via the bound flag; the caller
+/// gates on the storage mode so this never renders in normal operation.
+struct StorageWarningBanner: View {
+    @Binding var dismissed: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Constants.Spacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.white)
+            Text("Data isn't being saved — changes will be lost when you quit.")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { dismissed = true }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss for this launch")
+            .accessibilityLabel("Dismiss warning")
+        }
+        .padding(.horizontal, Constants.Spacing.md)
+        .padding(.vertical, Constants.Spacing.sm)
+        .frame(maxWidth: .infinity)
+        .background(Color.red)
+    }
+}
 
 extension View {
     /// Hides the native tab bar (replaced by the custom bar above). Applied both

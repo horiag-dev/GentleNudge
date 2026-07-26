@@ -23,6 +23,9 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var hasAPIKey = Constants.isAPIKeyConfigured
     @State private var confirmationPresenter = ConfirmationPresenter()
+    /// Presents the category editor from the no-categories gate, so the gate is
+    /// actionable in place (the `@Query` clears it as soon as a category exists).
+    @State private var showingAddCategory = false
     @FocusState private var inputFocused: Bool
 
     // Voice is no longer launched from here: the hands-free Voice mode has its
@@ -107,11 +110,19 @@ struct ChatView: View {
 
     // MARK: Content
 
+    /// True when there's no conversation to show (nothing committed, nothing
+    /// in flight). Gates which resting surface renders — and keeps the no-key
+    /// state from REPLACING a live transcript when the key goes missing
+    /// mid-conversation (that case shows a banner over the composer instead).
+    private var transcriptIsEmpty: Bool {
+        coordinator.transcript.isEmpty && !coordinator.isRunning
+    }
+
     @ViewBuilder
     private var content: some View {
-        if !hasAPIKey {
+        if !hasAPIKey && transcriptIsEmpty {
             ChatNoKeyState(onOpenSettings: openSettings)
-        } else if coordinator.transcript.isEmpty && !coordinator.isRunning {
+        } else if transcriptIsEmpty {
             // Resting state: the assistant hero, kept near the top.
             emptyStateScroll
         } else {
@@ -121,7 +132,12 @@ struct ChatView: View {
 
     private var emptyStateScroll: some View {
         ScrollView {
-            ChatEmptyState()
+            // Tapping a suggestion chip only drafts the text (never auto-sends)
+            // and focuses the composer, so the user stays in control.
+            ChatEmptyState { suggestion in
+                draft = suggestion
+                inputFocused = true
+            }
         }
         .scrollDismissesKeyboard(.interactively)
     }
@@ -209,6 +225,13 @@ struct ChatView: View {
 
     private var inputArea: some View {
         VStack(spacing: 8) {
+            // Key went missing MID-conversation: the transcript stays visible
+            // (content no longer swaps to the no-key hero) and this notice sits
+            // over the (disabled) composer with the Settings route.
+            if !hasAPIKey && !transcriptIsEmpty {
+                ChatNoKeyBanner(onOpenSettings: openSettings)
+            }
+
             if let error = coordinator.lastError {
                 ChatErrorBanner(
                     error: error,
@@ -227,10 +250,26 @@ struct ChatView: View {
             }
 
             if hasAPIKey && !hasCategories {
-                Label("Add a category before the assistant can create reminders.", systemImage: "info.circle")
+                // Actionable gate: opens the same category editor Settings uses;
+                // the `@Query`-driven `hasCategories` clears it on save.
+                Button {
+                    showingAddCategory = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder.badge.plus")
+                        Text("Add a category before the assistant can create reminders.")
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                        Text("Add")
+                            .fontWeight(.semibold)
+                    }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(Color.accentColor)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add a category")
+                .accessibilityHint("The assistant needs at least one category before it can create reminders")
             }
 
             inputBar
@@ -238,6 +277,12 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(AppColors.background)
+        .sheet(isPresented: $showingAddCategory) {
+            EditCategoryView(category: nil)
+                #if os(macOS)
+                .frame(minWidth: 480, minHeight: 620)
+                #endif
+        }
     }
 
     /// A tidy, always-single-row bar: the multiline field takes the flexible width

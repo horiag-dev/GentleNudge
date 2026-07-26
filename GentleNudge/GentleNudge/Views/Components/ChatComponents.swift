@@ -867,6 +867,18 @@ struct ChatErrorBanner: View {
 // MARK: - Empty / no-key states
 
 struct ChatEmptyState: View {
+    /// Called with the tapped example prompt. The host puts it in the input
+    /// draft and focuses the composer — never auto-sends. Nil hides the chips.
+    var onSuggestion: ((String) -> Void)? = nil
+
+    /// Example prompts chosen to teach the tool range: querying, creating into
+    /// a category, and the long-term memory.
+    private static let suggestions: [String] = [
+        "What's due today?",
+        "Add 'buy milk' to Errands",
+        "Remember my wife's name is Sarah",
+    ]
+
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "sparkles")
@@ -880,10 +892,58 @@ struct ChatEmptyState: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
+
+            if let onSuggestion {
+                VStack(spacing: 8) {
+                    ForEach(Self.suggestions, id: \.self) { suggestion in
+                        Button {
+                            onSuggestion(suggestion)
+                        } label: {
+                            Text("“\(suggestion)”")
+                                .font(.subheadline)
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(AppColors.secondaryBackground)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Puts this example in the message field")
+                    }
+                }
+                .padding(.top, 8)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 40)
         .padding(.horizontal, 24)
+    }
+}
+
+/// Compact notice shown ABOVE the composer when the API key goes missing
+/// MID-conversation: the transcript stays visible (swapping in the full
+/// `ChatNoKeyState` made the whole conversation appear to vanish), the
+/// composer is disabled, and this carries the Settings route.
+struct ChatNoKeyBanner: View {
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "key.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your Claude API key is missing. Add it in Settings to continue the conversation.")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                Button("Open Settings", action: onOpenSettings)
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

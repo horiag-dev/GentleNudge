@@ -16,12 +16,31 @@ struct MacContentView: View {
     @State private var showingSettings = false
     @State private var searchText = ""
     @State private var briefingVM = MorningBriefingViewModel()
+    /// Per-launch dismissal of the in-memory data-loss banner (deliberately not
+    /// persisted — the warning must return on every launch while it applies).
+    @State private var storageWarningDismissed = false
     @AppStorage(Constants.DefaultsKeys.habitVisibility)
     private var habitVisibilityRaw = HabitVisibility.all.rawValue
 
     /// Three-way habit surfacing mode (replaces the old show/hide boolean).
     private var habitVisibility: HabitVisibility {
         HabitVisibility(rawValue: habitVisibilityRaw) ?? .all
+    }
+
+    /// The sidebar search field's text, trimmed. Non-empty filters the current
+    /// list (title/notes, case-insensitive — same rule as iOS `.searchable` in
+    /// `AllRemindersView`) and swaps the composite Today page for the flat
+    /// filtered list so results are actually visible.
+    private var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespaces)
+    }
+
+    private func applySearch(_ items: [Reminder]) -> [Reminder] {
+        guard !searchQuery.isEmpty else { return items }
+        return items.filter {
+            $0.title.localizedCaseInsensitiveContains(searchQuery) ||
+            $0.notes.localizedCaseInsensitiveContains(searchQuery)
+        }
     }
 
     /// Lightweight, Sendable snapshots for the once-a-day briefing.
@@ -275,11 +294,16 @@ struct MacContentView: View {
                     }
 
                     Section {
+                        // Single source of truth with Settings' Sync row: the
+                        // ACTIVE storage mode chosen at launch, not the iCloud
+                        // sign-in state (signed in ≠ CloudKit actually running —
+                        // the two used to disagree here after a CloudKit init
+                        // failure). Reuses SettingsView's label/icon/color.
                         HStack(spacing: 6) {
-                            Image(systemName: "icloud.fill")
-                                .foregroundStyle(FileManager.default.ubiquityIdentityToken != nil ? .green : .orange)
+                            Image(systemName: SettingsView.syncIcon)
+                                .foregroundStyle(SettingsView.syncColor)
                                 .font(.caption)
-                            Text(FileManager.default.ubiquityIdentityToken != nil ? "iCloud" : "Local")
+                            Text(SettingsView.syncLabel)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -325,8 +349,10 @@ struct MacContentView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 8)
 
-                    // Reminder List - same structure as iOS TodayView
-                    if selectedSidebarItem == .today {
+                    // Reminder List - same structure as iOS TodayView. While a
+                    // search is active, Today's composite page yields to the
+                    // flat filtered list (the sections don't read the query).
+                    if selectedSidebarItem == .today && searchQuery.isEmpty {
                         todayListView(lists)
                     } else {
                         standardListView(lists)
@@ -345,6 +371,13 @@ struct MacContentView: View {
                 // Assistant — always-open, docked on the right (Mac).
                 ChatView(onOpenSettings: { showingSettings = true })
                     .frame(minWidth: 320, idealWidth: 380, maxWidth: 520)
+            }
+        }
+        // In-memory fallback = silent data loss. Mirror the iOS banner across
+        // the whole window (dismissible per launch); mode is fixed at launch.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if AppState.shared.storageMode == .memory && !storageWarningDismissed {
+                StorageWarningBanner(dismissed: $storageWarningDismissed)
             }
         }
         .sheet(isPresented: $showingAddReminder) {
@@ -557,28 +590,31 @@ struct MacContentView: View {
     }
 
     private func displayedReminders(_ lists: DerivedLists) -> [Reminder] {
+        let base: [Reminder]
         switch selectedSidebarItem {
         case .chat:
-            return []
+            base = []
         case .today:
-            return lists.needsAttention
+            base = lists.needsAttention
         case .scheduled:
-            return lists.scheduled
+            base = lists.scheduled
         case .all:
-            return lists.allActive
+            base = lists.allActive
         case .recurring:
-            return lists.recurring
+            base = lists.recurring
         case .completed:
-            return lists.completed
+            base = lists.completed
         case .habits:
             // The Habits list is the management surface: it shows ALL habits
             // (not just the focus selection); only "Hide habits" empties it.
-            return habitVisibility == .none ? [] : lists.habits
+            base = habitVisibility == .none ? [] : lists.habits
         case .category(let cat):
-            return lists.byCategory[cat.id] ?? []
+            base = lists.byCategory[cat.id] ?? []
         case .none:
-            return []
+            base = []
         }
+        // The sidebar search filters whatever list is showing (no-op when empty).
+        return applySearch(base)
     }
 
     private var sidebarTitle: String {
@@ -624,6 +660,9 @@ struct MacContentView: View {
     }
 
     private var emptyMessage: String {
+        if !searchQuery.isEmpty {
+            return "No matches for “\(searchQuery)”"
+        }
         switch selectedSidebarItem {
         case .chat: return "Assistant"
         case .today: return "All caught up!"
@@ -781,6 +820,14 @@ struct MacReminderRow: View {
         return isChecked ? "Mark not done" : "Mark complete"
     }
 
+    /// Title-case variant of the same wording for the right-click menu.
+    private var completionMenuTitle: String {
+        if isHabit {
+            return isChecked ? "Mark Not Done Today" : "Mark Done Today"
+        }
+        return isChecked ? "Mark Not Done" : "Mark Complete"
+    }
+
     private func toggleCompletion() {
         withAnimation(.spring(response: 0.3)) {
             if isHabit {
@@ -881,9 +928,18 @@ struct MacReminderRow: View {
                 reminder.setInProgress(!reminder.isInProgress)
             }
         }
-        // Right-click menu — the discoverable Mac idiom for the same toggle
-        // (doesn't conflict with press-and-hold on macOS).
+        // Right-click menu — the discoverable Mac idiom for the row's actions,
+        // so complete/delete don't require opening the detail panel.
         .contextMenu {
+            // Same toggle as the checkbox (done-today wording for habits).
+            Button {
+                toggleCompletion()
+            } label: {
+                Label(
+                    completionMenuTitle,
+                    systemImage: isChecked ? "circle" : "checkmark.circle"
+                )
+            }
             if !isHabit && !reminder.isCompleted {
                 Button {
                     withAnimation(.spring(response: 0.3)) {
@@ -894,6 +950,18 @@ struct MacReminderRow: View {
                         reminder.isInProgress ? "Mark Not Started" : "Mark In Progress",
                         systemImage: reminder.isInProgress ? "circle" : "circle.lefthalf.filled"
                     )
+                }
+            }
+            // Delete matches the list/detail behavior (`modelContext.delete`;
+            // the root's reminders observer clears any detail selection).
+            // Habits are managed from their own surfaces — no surprise Delete
+            // that would wipe a habit's whole history from a Today row.
+            if !isHabit {
+                Divider()
+                Button(role: .destructive) {
+                    modelContext.delete(reminder)
+                } label: {
+                    Label("Delete", systemImage: "trash")
                 }
             }
         }

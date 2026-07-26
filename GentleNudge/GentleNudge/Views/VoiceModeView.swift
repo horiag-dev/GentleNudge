@@ -1,5 +1,11 @@
 import SwiftUI
 import SwiftData
+#if os(iOS)
+import UIKit
+#endif
+#if os(macOS)
+import AppKit
+#endif
 
 /// A dedicated, hands-free "use it in the car" voice conversation over the SAME
 /// shared `ChatCoordinator` the typed chat uses — so reminders are still created /
@@ -99,8 +105,19 @@ struct VoiceModeView: View {
         /// A transient per-turn error; shown briefly, then we resume listening.
         case error(String)
         /// A terminal-for-this-session block (no key / permission denied /
-        /// recognizer unavailable). We stop looping and show a Settings hint.
-        case blocked(String)
+        /// recognizer unavailable). We stop looping and show a recovery hint.
+        case blocked(String, BlockedReason)
+    }
+
+    /// Why the session is terminally blocked — drives which recovery action the
+    /// blocked controls offer. A missing key is fixed in the app's OWN Settings
+    /// (that's where the key field lives); a permission denial is fixed only in
+    /// the SYSTEM Settings (the in-app Settings tab has no permission toggles);
+    /// an unavailable recognizer has nothing to open at all.
+    enum BlockedReason: Equatable {
+        case noAPIKey
+        case permissionDenied
+        case unavailable
     }
 
     var body: some View {
@@ -245,7 +262,7 @@ struct VoiceModeView: View {
                 .multilineTextAlignment(.center)
                 .frame(minHeight: 80)
 
-        case .blocked(let message):
+        case .blocked(let message, _):
             Text(message)
                 .font(.title3)
                 .foregroundStyle(.secondary)
@@ -258,19 +275,33 @@ struct VoiceModeView: View {
 
     @ViewBuilder
     private var controls: some View {
-        if case .blocked = phase {
+        if case .blocked(_, let reason) = phase {
             VStack(spacing: Constants.Spacing.sm) {
-                if onOpenSettings != nil {
+                switch reason {
+                case .noAPIKey:
+                    // The key field lives in the app's own Settings.
+                    if onOpenSettings != nil {
+                        Button {
+                            endAndDismiss()
+                            onOpenSettings?()
+                        } label: {
+                            openSettingsLabel
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                case .permissionDenied:
+                    // Permission toggles live ONLY in the system Settings —
+                    // routing to the in-app Settings tab was a dead end.
                     Button {
                         endAndDismiss()
-                        onOpenSettings?()
+                        openSystemSettings()
                     } label: {
-                        Text("Open Settings")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
+                        openSettingsLabel
                     }
                     .buttonStyle(.borderedProminent)
+                case .unavailable:
+                    // Nothing to open (network / Siri services) — just Close.
+                    EmptyView()
                 }
                 Button("Close") { endAndDismiss() }
                     .buttonStyle(.bordered)
@@ -292,6 +323,27 @@ struct VoiceModeView: View {
         }
     }
 
+    private var openSettingsLabel: some View {
+        Text("Open Settings")
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+    }
+
+    /// Opens the place where mic/speech permissions can actually be changed:
+    /// the app's page in the SYSTEM Settings on iOS, the Privacy pane on macOS.
+    private func openSystemSettings() {
+        #if os(iOS)
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+        #elseif os(macOS)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+            NSWorkspace.shared.open(url)
+        }
+        #endif
+    }
+
     // MARK: Session lifecycle
 
     /// Starts the session. No-op after the first call. If there's no Claude key we
@@ -301,7 +353,7 @@ struct VoiceModeView: View {
         started = true
 
         guard Constants.isAPIKeyConfigured else {
-            phase = .blocked("Add your Claude API key in Settings to talk to the assistant.")
+            phase = .blocked("Add your Claude API key in Settings to talk to the assistant.", .noAPIKey)
             return
         }
 
@@ -391,7 +443,7 @@ struct VoiceModeView: View {
     private func startListening() {
         guard sessionActive else { return }
         guard speech.isAvailable else {
-            phase = .blocked("Speech recognition isn't available on this device.")
+            phase = .blocked("Speech recognition isn't available on this device.", .unavailable)
             sessionActive = false
             return
         }
@@ -458,7 +510,7 @@ struct VoiceModeView: View {
     private func blockPermission() {
         sessionActive = false
         speech.cancel()
-        phase = .blocked("Enable Microphone and Speech Recognition for GentleNudge in Settings to use voice.")
+        phase = .blocked("Enable Microphone and Speech Recognition for GentleNudge in Settings to use voice.", .permissionDenied)
     }
 
     /// The recognizer reported it can't work right now (server recognition needs
@@ -469,7 +521,7 @@ struct VoiceModeView: View {
         guard sessionActive else { return }
         sessionActive = false
         speech.cancel()
-        phase = .blocked("Speech recognition isn't available right now. Check your internet connection, then reopen voice mode.")
+        phase = .blocked("Speech recognition isn't available right now. Check your internet connection, then reopen voice mode.", .unavailable)
     }
 
     private func resumeAfterError() {

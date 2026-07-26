@@ -2,9 +2,13 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 import CloudKit
+#if os(iOS)
+import UIKit
+#endif
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
     @Query(sort: \UserMemory.updatedAt, order: .reverse) private var memories: [UserMemory]
@@ -34,6 +38,10 @@ struct SettingsView: View {
     @State private var notificationsEnabled = NotificationService.shared.isEnabled
     @State private var notificationTime = NotificationService.shared.notificationTime
     @State private var notificationPermissionStatus: String = "Checking..."
+    /// True exactly when the system permission is `.denied` — drives the
+    /// "Enable in Settings" deep link (kept as a bool so the UI never has to
+    /// string-match the display text above).
+    @State private var notificationPermissionDenied = false
     @State private var isTestingNotification = false
     #endif
 
@@ -165,6 +173,18 @@ struct SettingsView: View {
                         Spacer()
                         Text(notificationPermissionStatus)
                             .foregroundStyle(notificationPermissionStatus == "Authorized" ? .green : .orange)
+                    }
+
+                    // Denied is fixable only in the system Settings — without
+                    // this link the "Denied" row is a dead end.
+                    if notificationPermissionDenied {
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Label("Enable in Settings", systemImage: "arrow.up.forward.app")
+                        }
                     }
 
                     Button {
@@ -804,6 +824,15 @@ struct SettingsView: View {
                 }
                 #endif
             }
+            #if os(iOS)
+            // Coming back from the system Settings (via "Enable in Settings")
+            // re-activates the scene — refresh so the row isn't stale.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    Task { await checkNotificationPermission() }
+                }
+            }
+            #endif
             // The iOS root replaces the system tab bar with its own bottom bar.
             .hidesNativeTabBar()
         }
@@ -1439,6 +1468,7 @@ struct SettingsView: View {
     private func checkNotificationPermission() async {
         let status = await NotificationService.shared.checkPermissionStatus()
         await MainActor.run {
+            notificationPermissionDenied = (status == .denied)
             switch status {
             case .authorized:
                 notificationPermissionStatus = "Authorized"

@@ -108,14 +108,17 @@ struct ReminderDetailView: View {
                         }
                     } label: {
                         HStack(spacing: Constants.Spacing.sm) {
-                            Image(systemName: reminder.isInProgress ? "circle.lefthalf.filled" : "play.circle")
+                            // Same glyph as every other in-progress surface
+                            // (rows, Mac menu): half-filled circle, indigo when
+                            // active — not the one-off play.circle.
+                            Image(systemName: "circle.lefthalf.filled")
                                 .font(.title)
                                 .foregroundStyle(reminder.isInProgress ? Color.indigo : Color.secondary)
                             Text(reminder.isInProgress ? "In Progress" : "Mark In Progress")
                                 .font(.headline)
                             Spacer()
                             if reminder.isInProgress {
-                                Text("Tap to reset")
+                                Text("Tap to mark not started")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
