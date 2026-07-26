@@ -1405,6 +1405,39 @@ final class CompleteInContextTests: XCTestCase {
         XCTAssertNil(reminder.nextOccurrenceID)
     }
 
+    /// Regression: complete → (successor also completed) → uncomplete →
+    /// re-complete must NOT spawn a second live future occurrence. The kept,
+    /// non-pristine successor stays referenced by `nextOccurrenceID`, so the
+    /// re-complete just marks done without spawning a duplicate.
+    func test_recomplete_afterUncompleteKeptAdvancedSuccessor_doesNotDoubleSpawn() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        // Daily A completed → spawns B; B completed → spawns C.
+        let a = Reminder(title: "Stretch", dueDate: Date(), recurrence: .daily)
+        context.insert(a)
+        a.complete(in: context)
+
+        let bID = try XCTUnwrap(a.nextOccurrenceID)
+        let b = try XCTUnwrap(context.fetch(FetchDescriptor<Reminder>()).first { $0.id == bID })
+        b.complete(in: context)
+
+        // Uncomplete A: B has been acted on (completed), so it is KEPT and A
+        // keeps pointing at it.
+        a.uncomplete(in: context)
+        XCTAssertFalse(a.isCompleted)
+        XCTAssertEqual(a.nextOccurrenceID, bID, "kept successor must stay referenced")
+
+        // Re-complete A: must not spawn a new occurrence alongside C.
+        a.complete(in: context)
+
+        let after = try context.fetch(FetchDescriptor<Reminder>())
+        XCTAssertEqual(after.count, 3, "A, B, and C only — no duplicate occurrence")
+        XCTAssertEqual(after.filter { !$0.isCompleted }.count, 1,
+                       "exactly one live future occurrence of the series")
+        XCTAssertTrue(a.isCompleted)
+    }
+
     func test_complete_habit_marksDoneTodayWithoutPermanentCompletion() throws {
         let container = try makeContainer()
         let context = container.mainContext

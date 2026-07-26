@@ -277,6 +277,25 @@ class NotificationService {
     private static let aiBodyKey = "morningBriefingNotificationBody"
     private static let aiBodyDayKey = "morningBriefingNotificationBodyDay"
 
+    /// Start-of-day of the day the repeating morning trigger will NEXT fire.
+    /// A repeating `UNCalendarNotificationTrigger` fires at the next occurrence
+    /// of its hour/minute — which is still TODAY when the app is backgrounded
+    /// before the alert time, and tomorrow otherwise. Bucketing must use this
+    /// day: a hardcoded "tomorrow" mis-frames an item due today as "overdue".
+    var nextMorningFireDay: Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let now = Date()
+        var components = calendar.dateComponents([.year, .month, .day], from: now)
+        components.hour = notificationHour
+        components.minute = notificationMinute
+        if let todaysFireTime = calendar.date(from: components), now < todaysFireTime {
+            return calendar.startOfDay(for: now)
+        }
+        return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
+            ?? calendar.startOfDay(for: now)
+    }
+
     /// Pre-generates the AI-prioritized notification body during the iOS
     /// background window and reschedules the morning notification with it.
     ///
@@ -291,7 +310,8 @@ class NotificationService {
     ///    fallback in place.
     ///
     /// `reminders` are lightweight main-actor snapshots (all reminders); the
-    /// service selects tomorrow's overdue/due-today/upcoming set itself.
+    /// service selects the overdue/due-today/upcoming set itself, bucketed
+    /// against the day the notification will next fire (`nextMorningFireDay`).
     func preGenerateAndScheduleMorningNotification(
         needsAttentionCount: Int,
         topItems: [String],
@@ -305,16 +325,16 @@ class NotificationService {
         // Only attempt AI when there's a key and something to prioritize.
         guard Constants.isAPIKeyConfigured, needsAttentionCount > 0 else { return }
 
-        // The notification fires TOMORROW morning, so prioritize against tomorrow.
+        // Prioritize against the day the notification will actually fire —
+        // still TODAY when the user backgrounds the app before the alert time,
+        // tomorrow otherwise (see `nextMorningFireDay`).
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
-        guard let tomorrow = calendar.date(
-            byAdding: .day, value: 1, to: calendar.startOfDay(for: Date())
-        ) else { return }
+        let referenceDay = nextMorningFireDay
 
         let candidates = MorningBriefingService.selectCandidates(
             from: reminders,
-            referenceDate: tomorrow,
+            referenceDate: referenceDay,
             calendar: calendar
         )
         guard !candidates.isEmpty else { return }
@@ -339,7 +359,7 @@ class NotificationService {
             }
             let briefing = await service.generate(
                 candidates: candidates,
-                referenceDate: tomorrow,
+                referenceDate: referenceDay,
                 calendar: calendar,
                 timeZone: calendar.timeZone
             )
@@ -348,7 +368,7 @@ class NotificationService {
 
             UserDefaults.standard.set(briefing.notificationBody, forKey: Self.aiBodyKey)
             UserDefaults.standard.set(
-                Self.dayKey(for: tomorrow, calendar: calendar),
+                Self.dayKey(for: referenceDay, calendar: calendar),
                 forKey: Self.aiBodyDayKey
             )
             self.updateScheduledNotificationContent(

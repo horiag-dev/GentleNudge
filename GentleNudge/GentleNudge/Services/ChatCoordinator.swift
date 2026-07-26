@@ -1113,7 +1113,8 @@ enum ChatActivity: Equatable, Sendable {
 
 /// A UI-facing transport error surfaced as an inline banner. `isRetryable` gates
 /// whether the banner offers Retry (network/rate-limit/server/generic) versus a
-/// Settings deep link (missing/rejected key).
+/// Settings deep link (missing/rejected key). A deterministic bad request (400)
+/// offers neither — retrying the identical request can never succeed.
 struct ChatError: Identifiable, Sendable {
     enum Kind: Sendable {
         case notConfigured
@@ -1121,6 +1122,7 @@ struct ChatError: Identifiable, Sendable {
         case rateLimited
         case network
         case server
+        case badRequest
         case generic
     }
 
@@ -1130,7 +1132,7 @@ struct ChatError: Identifiable, Sendable {
 
     var isRetryable: Bool {
         switch kind {
-        case .notConfigured, .authentication: return false
+        case .notConfigured, .authentication, .badRequest: return false
         case .rateLimited, .network, .server, .generic: return true
         }
     }
@@ -1163,7 +1165,9 @@ struct ChatError: Identifiable, Sendable {
             kind = .server
             message = "The assistant is temporarily unavailable. Please try again."
         case .badRequest:
-            kind = .generic
+            // A 400 is deterministic — surfacing it as retryable would offer a
+            // Retry button that can never succeed.
+            kind = .badRequest
             message = "The assistant couldn't process that request."
         case .network:
             kind = .network

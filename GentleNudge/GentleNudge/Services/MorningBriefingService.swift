@@ -357,6 +357,11 @@ final class MorningBriefingViewModel {
 
     private(set) var state: DisplayState = .hidden
 
+    /// The calendar day the current `.shown` briefing belongs to. Lets an app
+    /// left running across midnight (typically the Mac) drop yesterday's
+    /// briefing and generate a fresh one, instead of showing it forever.
+    private var shownDay: Date?
+
     private let service: MorningBriefingService
     private let calendar: Calendar
     private static let lastShownDayKey = "morningBriefingLastShownDay"
@@ -375,9 +380,17 @@ final class MorningBriefingViewModel {
     /// a deterministic local summary if the AI call can't run, and nothing at all
     /// when there's no important work.
     func refreshIfNeeded(reminders: [MorningBriefingService.ReminderSummary]) async {
-        // Already loading or already shown this session → nothing to do.
+        // Already loading → nothing to do.
         if state == .loading { return }
-        if case .shown = state { return }
+        if case .shown = state {
+            // Shown TODAY → nothing to do. But on a long-running app the day
+            // can roll over while the briefing stays on screen; then reset so
+            // a fresh briefing can generate (the once-per-day UserDefaults
+            // gate below still applies, so this never regenerates same-day).
+            if let shownDay, calendar.isDate(shownDay, inSameDayAs: Date()) { return }
+            state = .hidden
+            shownDay = nil
+        }
         // Already handled today (shown or dismissed) → skip.
         guard UserDefaults.standard.string(forKey: Self.lastShownDayKey) != todayKey else { return }
         // Empty could mean "no data yet" (CloudKit still syncing) as easily as
@@ -405,12 +418,14 @@ final class MorningBriefingViewModel {
         // Respect a dismissal that happened while we were generating.
         guard state == .loading else { return }
         state = .shown(briefing ?? MorningBriefingService.localFallbackBriefing(candidates: candidates))
+        shownDay = Date()
         markHandledToday()
     }
 
     /// Dismiss for the rest of the day.
     func dismiss() {
         state = .hidden
+        shownDay = nil
         markHandledToday()
     }
 

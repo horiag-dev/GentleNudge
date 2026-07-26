@@ -13,11 +13,14 @@ enum Constants {
                 return key
             }
             // One-time migration: an earlier build stored the key in UserDefaults.
-            // Move it into the Keychain and scrub the plaintext copy.
+            // Move it into the Keychain, and scrub the plaintext copy only once
+            // the Keychain write actually succeeded — deleting it after a failed
+            // write would lose the key entirely.
             if let legacyKey = UserDefaults.standard.string(forKey: apiKeyUserDefaultsKey),
                !legacyKey.isEmpty {
-                KeychainHelper.set(legacyKey, for: apiKeyKeychainAccount)
-                UserDefaults.standard.removeObject(forKey: apiKeyUserDefaultsKey)
+                if KeychainHelper.set(legacyKey, for: apiKeyKeychainAccount) {
+                    UserDefaults.standard.removeObject(forKey: apiKeyUserDefaultsKey)
+                }
                 return legacyKey
             }
             return apiKeyPlaceholder

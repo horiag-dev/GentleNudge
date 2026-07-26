@@ -347,7 +347,10 @@ final class Reminder {
         // spawn a second next occurrence (data duplication).
         guard !isCompleted else { return }
 
-        if isRecurring, let nextReminder = createNextOccurrence() {
+        // Spawn only when no successor exists yet. After an uncomplete that KEPT
+        // an advanced (non-pristine) successor, `nextOccurrenceID` still points
+        // to it — re-completing must not spawn a duplicate alongside it.
+        if isRecurring, nextOccurrenceID == nil, let nextReminder = createNextOccurrence() {
             modelContext.insert(nextReminder)
             nextOccurrenceID = nextReminder.id
         }
@@ -362,13 +365,21 @@ final class Reminder {
             let id = spawnedID
             var descriptor = FetchDescriptor<Reminder>(predicate: #Predicate { $0.id == id })
             descriptor.fetchLimit = 1
-            // Only remove the spawned occurrence if it's still pristine (untouched
-            // and not itself completed), so we never delete data the user has acted on.
-            if let spawned = try? modelContext.fetch(descriptor).first,
-               !spawned.isCompleted {
-                modelContext.delete(spawned)
+            if let spawned = try? modelContext.fetch(descriptor).first {
+                // Only remove the spawned occurrence if it's still pristine (not
+                // itself completed), so we never delete data the user has acted on.
+                if !spawned.isCompleted {
+                    modelContext.delete(spawned)
+                    nextOccurrenceID = nil
+                }
+                // Non-pristine successor is KEPT — leave `nextOccurrenceID`
+                // pointing at it so a later re-complete doesn't spawn a second
+                // live occurrence of the same series alongside it.
+            } else {
+                // Successor no longer exists (deleted elsewhere): clear the
+                // dangling id so a later re-complete can spawn fresh.
+                nextOccurrenceID = nil
             }
-            nextOccurrenceID = nil
         }
         markIncomplete()
     }

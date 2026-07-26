@@ -56,6 +56,19 @@ struct ReminderDetailView: View {
     }
 
     var body: some View {
+        // The reminder can be deleted out from under this open sheet (assistant
+        // tool call, or another device via a CloudKit merge). Reading properties
+        // of an invalidated @Model crashes, so every body read is guarded behind
+        // this check — render nothing and dismiss instead.
+        if reminder.isDeleted {
+            Color.clear
+                .onAppear { dismiss() }
+        } else {
+            detailContent
+        }
+    }
+
+    private var detailContent: some View {
         ScrollView {
             VStack(spacing: Constants.Spacing.lg) {
                 // Completion Status
@@ -254,19 +267,19 @@ struct ReminderDetailView: View {
                     VStack(spacing: Constants.Spacing.sm) {
                         HStack(spacing: Constants.Spacing.xs) {
                             QuickDateButton(title: "Today", date: Date(), isSelected: isDateToday) {
-                                reminder.dueDate = Calendar.current.startOfDay(for: Date())
+                                setDueDate(Calendar.current.startOfDay(for: Date()))
                             }
                             QuickDateButton(title: "Tomorrow", date: Date.tomorrow, isSelected: isDateTomorrow) {
-                                reminder.dueDate = Calendar.current.startOfDay(for: Date.tomorrow)
+                                setDueDate(Calendar.current.startOfDay(for: Date.tomorrow))
                             }
                             QuickDateButton(title: "Weekend", date: Date.nextWeekend, isSelected: isDateWeekend) {
-                                reminder.dueDate = Date.nextWeekend
+                                setDueDate(Date.nextWeekend)
                             }
                             QuickDateButton(title: "Pick date", date: Date(), isSelected: showingDatePicker) {
                                 withAnimation {
                                     showingDatePicker = true
                                     if reminder.dueDate == nil {
-                                        reminder.dueDate = Calendar.current.startOfDay(for: Date())
+                                        setDueDate(Calendar.current.startOfDay(for: Date()))
                                     }
                                 }
                             }
@@ -278,7 +291,7 @@ struct ReminderDetailView: View {
                                     "Due",
                                     selection: Binding(
                                         get: { reminder.dueDate ?? Date() },
-                                        set: { reminder.dueDate = $0 }
+                                        set: { setDueDate($0) }
                                     ),
                                     displayedComponents: [.date]
                                 )
@@ -301,7 +314,7 @@ struct ReminderDetailView: View {
                             }
 
                             Button {
-                                reminder.dueDate = nil
+                                setDueDate(nil)
                                 reminder.recurrence = .none
                                 showingDatePicker = false
                             } label: {
@@ -478,6 +491,17 @@ struct ReminderDetailView: View {
 
     private func completeReminder() {
         reminder.complete(in: modelContext)
+    }
+
+    /// All UI due-date edits go through here: picking a new date defines a NEW
+    /// schedule anchored to that date's own day-of-month, so any stored month
+    /// anchor from the old schedule must be dropped. `monthAnchorDay` trusts
+    /// the stored anchor when the due date sits at a short month's end, which
+    /// would otherwise resurrect e.g. "the 31st" after the user deliberately
+    /// moved a month-end date (Apr 30 → next occurrence May 31, not May 30).
+    private func setDueDate(_ date: Date?) {
+        reminder.dueDate = date
+        reminder.recurrenceAnchorDay = nil
     }
 }
 

@@ -62,27 +62,20 @@ struct ContentView: View {
         Array(needsAttentionItems.prefix(5).map { $0.title })
     }
 
-    // For scheduling tomorrow's notification - what will need attention tomorrow?
-    private var tomorrowNeedsAttentionItems: [Reminder] {
+    // For scheduling the morning notification: what will need attention on the
+    // day it actually fires (still today when the app is backgrounded before
+    // the alert time, tomorrow otherwise)?
+    private func needsAttentionItems(asOf day: Date) -> [Reminder] {
         let calendar = Calendar.current
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date()))!
+        let referenceDay = calendar.startOfDay(for: day)
 
         return reminders.filter { reminder in
             guard !reminder.isHabit, !reminder.isCompleted else { return false }
             guard let dueDate = reminder.dueDate else { return false }
 
-            // Will be overdue tomorrow (due before tomorrow) or due tomorrow
-            let dueDay = calendar.startOfDay(for: dueDate)
-            return dueDay <= tomorrow
+            // Will be overdue (due before that day) or due that day
+            return calendar.startOfDay(for: dueDate) <= referenceDay
         }
-    }
-
-    private var tomorrowNeedsAttentionCount: Int {
-        tomorrowNeedsAttentionItems.count
-    }
-
-    private var tomorrowTopItemTitles: [String] {
-        Array(tomorrowNeedsAttentionItems.prefix(5).map { $0.title })
     }
 
     /// Lightweight, Sendable snapshots of every reminder for off-main
@@ -178,13 +171,18 @@ struct ContentView: View {
                 // `keyboardWillShow` re-fires and hides the bar again.
                 keyboardVisible = false
                 // Update scheduled notification when app goes to background.
-                // Use TOMORROW's data since the notification fires tomorrow morning.
-                // This pre-generates an AI-prioritized body inside a background-task
-                // window and always schedules the non-AI fallback first, so the
-                // notification is never empty or worse than today.
+                // Use the data for the day the notification will actually fire —
+                // still TODAY when backgrounding before the alert time, tomorrow
+                // otherwise (a repeating calendar trigger fires at the NEXT
+                // occurrence of its hour/minute). This pre-generates an
+                // AI-prioritized body inside a background-task window and always
+                // schedules the non-AI fallback first, so the notification is
+                // never empty or worse than today.
+                let fireDay = NotificationService.shared.nextMorningFireDay
+                let fireDayItems = needsAttentionItems(asOf: fireDay)
                 NotificationService.shared.preGenerateAndScheduleMorningNotification(
-                    needsAttentionCount: tomorrowNeedsAttentionCount,
-                    topItems: tomorrowTopItemTitles,
+                    needsAttentionCount: fireDayItems.count,
+                    topItems: Array(fireDayItems.prefix(5).map { $0.title }),
                     reminders: reminderSummaries
                 )
             }

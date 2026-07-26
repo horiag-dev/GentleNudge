@@ -477,6 +477,14 @@ actor ReminderRepository {
             if reminder.category?.id != category.id {
                 reminder.category = category
                 changes.append(ReminderFieldChange(label: "Category", value: category.name))
+                // Habits are never in-progress. Clear the flag when the move
+                // makes this a habit — `setInProgress` guards on `!isHabit`, so
+                // once the reminder IS a habit the flag could never be cleared
+                // again (phantom "In Progress" if later moved back out). Assign
+                // the stored property directly to bypass that guard.
+                if reminder.isHabit, reminder.isInProgress {
+                    reminder.isInProgress = false
+                }
             }
         }
 

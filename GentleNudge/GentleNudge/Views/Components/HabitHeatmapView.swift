@@ -340,8 +340,20 @@ struct HabitHistoryEditor: View {
         // Don't allow future dates
         guard startOfDay <= calendar.startOfDay(for: Date()) else { return }
 
-        if habit.wasCompletedOn(date: startOfDay) {
-            // Remove completion
+        if calendar.isDateInToday(startOfDay) {
+            // TODAY must go through the model's habit methods so `completedAt`
+            // (which drives the row checkbox / "done today" progress) stays in
+            // sync with the history — toggling only `habitCompletionDates`
+            // would turn the heatmap dot green while the checkbox stays
+            // unchecked, and vice-versa.
+            if habit.wasCompletedOn(date: startOfDay) {
+                habit.clearHabitCompletion()
+            } else {
+                habit.markHabitDoneToday()
+            }
+        } else if habit.wasCompletedOn(date: startOfDay) {
+            // Remove completion (past days: history only — `completedAt` only
+            // represents "today")
             habit.habitCompletionDates.removeAll { calendar.isDate($0, inSameDayAs: startOfDay) }
         } else {
             // Add completion

@@ -368,6 +368,15 @@ struct MacContentView: View {
             }
         }
         .onChange(of: reminders) { _, _ in
+            // If the reminder shown in the detail panel was deleted out from
+            // under us (assistant tool call, another device via CloudKit),
+            // clear the selection before the panel body reads an invalidated
+            // model. Check `isDeleted` first so we never touch properties of
+            // an already-invalidated model.
+            if let sel = selectedReminder,
+               sel.isDeleted || !reminders.contains(where: { $0.id == sel.id }) {
+                selectedReminder = nil
+            }
             // Data may finish loading (e.g. CloudKit sync) after the first pass.
             Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
         }
@@ -630,7 +639,12 @@ struct MacContentView: View {
 
     private func deleteReminders(at offsets: IndexSet, from displayed: [Reminder]) {
         for index in offsets {
-            modelContext.delete(displayed[index])
+            let reminder = displayed[index]
+            // Don't leave the detail panel bound to a deleted model.
+            if selectedReminder?.id == reminder.id {
+                selectedReminder = nil
+            }
+            modelContext.delete(reminder)
         }
     }
 }
@@ -1082,15 +1096,15 @@ struct MacReminderDetailPanel: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Due Date").font(.caption).foregroundStyle(.secondary)
                         if let dueDate = reminder.dueDate {
-                            DatePicker("", selection: Binding(get: { dueDate }, set: { reminder.dueDate = $0 }), displayedComponents: [.date])
+                            DatePicker("", selection: Binding(get: { dueDate }, set: { setDueDate($0) }), displayedComponents: [.date])
                                 .labelsHidden()
 
                             // Recurrence — only meaningful for a dated reminder, mirroring
-                            // the iOS editor. Bind straight to `reminder.recurrence`; the
-                            // effective month anchor is always re-derived from the current
-                            // due date by `Reminder.monthAnchorDay`, so editing the date or
-                            // cadence never leaves a stale `recurrenceAnchorDay` that
-                            // contradicts the new value — we deliberately don't write it here.
+                            // the iOS editor. Date edits go through `setDueDate`, which
+                            // clears the stored month anchor: `monthAnchorDay` trusts the
+                            // stored anchor when the due date sits at a short month's end,
+                            // so keeping it would resurrect the old schedule (e.g. "the
+                            // 31st") after the user deliberately picked a new day.
                             RecurrencePicker(recurrence: $reminder.recurrence)
 
                             if let detailed = reminder.detailedRecurrence {
@@ -1106,20 +1120,20 @@ struct MacReminderDetailPanel: View {
                             // Match the iOS "Clear date": dropping the due date also
                             // clears recurrence (a recurring reminder needs a due date).
                             Button("Remove", role: .destructive) {
-                                reminder.dueDate = nil
+                                setDueDate(nil)
                                 reminder.recurrence = .none
                             }
                             .font(.caption)
                         } else {
                             HStack(spacing: 6) {
                                 Button("Today") {
-                                    reminder.dueDate = Calendar.current.startOfDay(for: Date())
+                                    setDueDate(Calendar.current.startOfDay(for: Date()))
                                 }
                                 Button("Tomorrow") {
-                                    reminder.dueDate = Calendar.current.startOfDay(for: Date.tomorrow)
+                                    setDueDate(Calendar.current.startOfDay(for: Date.tomorrow))
                                 }
                                 Button("Weekend") {
-                                    reminder.dueDate = Date.nextWeekend
+                                    setDueDate(Date.nextWeekend)
                                 }
                             }
                             .font(.caption)
@@ -1180,6 +1194,17 @@ struct MacReminderDetailPanel: View {
         .confirmationDialog("Delete?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) { modelContext.delete(reminder); onClose() }
         }
+    }
+
+    /// All UI due-date edits go through here (mirroring the iOS editor):
+    /// picking a new date defines a NEW schedule anchored to that date's own
+    /// day-of-month, so any stored month anchor from the old schedule must be
+    /// dropped — `monthAnchorDay` trusts the stored anchor when the due date
+    /// sits at a short month's end, which would otherwise resurrect e.g. "the
+    /// 31st" after the user deliberately moved a month-end date.
+    private func setDueDate(_ date: Date?) {
+        reminder.dueDate = date
+        reminder.recurrenceAnchorDay = nil
     }
 
     // MARK: Draft commit plumbing
