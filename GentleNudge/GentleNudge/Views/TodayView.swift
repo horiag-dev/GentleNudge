@@ -603,6 +603,17 @@ struct HabitRow: View {
         .onTapGesture {
             showingHeatmap = true
         }
+        // Swipe-left reveals Done only — no Delete (habit deletion deliberately
+        // stays in the detail view). Routes through the same mark-done-today
+        // mechanism as the leading circle; idempotent when already done today.
+        .reminderSwipeActions([
+            RowSwipeAction(title: "Done", systemImage: "checkmark", tint: AppColors.success) {
+                withAnimation(Constants.Animation.spring) {
+                    HapticManager.impact(.medium)
+                    habit.markHabitDoneToday()
+                }
+            }
+        ])
         .sheet(isPresented: $showingHeatmap) {
             HabitDetailSheet(habit: habit)
         }
@@ -799,6 +810,18 @@ struct UpcomingReminderRow: View {
                 reminder.setInProgress(!reminder.isInProgress)
             }
         }
+        // Swipe-left reveals Complete/Delete behind the card (reveal-then-tap;
+        // see NeedsAttentionRow for the attachment-order rationale).
+        .reminderSwipeActions([
+            RowSwipeAction(title: "Complete", systemImage: "checkmark", tint: AppColors.success) {
+                toggleCompletion()
+            },
+            RowSwipeAction(title: "Delete", systemImage: "trash", tint: AppColors.destructive) {
+                withAnimation {
+                    modelContext.delete(reminder)
+                }
+            },
+        ])
         .sheet(isPresented: $showingDetail) {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
@@ -829,6 +852,12 @@ struct UpcomingReminderRow: View {
             }
             Button("Open") {
                 showingDetail = true
+            }
+            // Parity with the sighted-user swipe Delete.
+            Button("Delete", role: .destructive) {
+                withAnimation {
+                    modelContext.delete(reminder)
+                }
             }
         }
     }
@@ -941,6 +970,20 @@ struct NeedsAttentionRow: View {
                 reminder.setInProgress(!reminder.isInProgress)
             }
         }
+        // Swipe-left reveals Complete/Delete behind the card (reveal-then-tap;
+        // a full swipe never auto-triggers). Attached AFTER the tap/long-press
+        // so the whole card slides as one unit and, when open, the modifier's
+        // tap-catcher wins the tap (closing instead of opening the detail).
+        .reminderSwipeActions([
+            RowSwipeAction(title: "Complete", systemImage: "checkmark", tint: AppColors.success) {
+                toggleCompletion()
+            },
+            RowSwipeAction(title: "Delete", systemImage: "trash", tint: AppColors.destructive) {
+                withAnimation {
+                    modelContext.delete(reminder)
+                }
+            },
+        ])
         .sheet(isPresented: $showingDetail) {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
@@ -971,6 +1014,12 @@ struct NeedsAttentionRow: View {
             }
             Button("Open") {
                 showingDetail = true
+            }
+            // Parity with the sighted-user swipe Delete.
+            Button("Delete", role: .destructive) {
+                withAnimation {
+                    modelContext.delete(reminder)
+                }
             }
         }
     }

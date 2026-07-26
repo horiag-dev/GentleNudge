@@ -158,33 +158,11 @@ struct ReminderRow: View {
                 Label("Delete", systemImage: "trash")
             }
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                withAnimation {
-                    modelContext.delete(reminder)
-                }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            Button {
-                withAnimation {
-                    HapticManager.notification(.success)
-                    if reminder.isCompleted {
-                        reminder.uncomplete(in: modelContext)
-                    } else {
-                        completeReminder()
-                    }
-                }
-            } label: {
-                Label(
-                    reminder.isCompleted ? "Undo" : "Done",
-                    systemImage: reminder.isCompleted ? "arrow.uturn.backward" : "checkmark"
-                )
-            }
-            .tint(.green)
-        }
+        // Custom swipe-to-reveal (the `.swipeActions` that used to be here are
+        // List-only and were silently dead in these ScrollView layouts).
+        // Reveal-then-tap, trailing edge only; iOS-only (no-op on macOS, where
+        // this row isn't used anyway).
+        .reminderSwipeActions(rowSwipeActions)
         // VoiceOver: one element per row (title + status), with every inner
         // control re-exposed as a named action — combining otherwise leaves
         // the toggle, context menu, and long-press unreachable.
@@ -229,6 +207,39 @@ struct ReminderRow: View {
             }
             .presentationDetents([.medium, .large])
         }
+    }
+
+    /// Trailing swipe actions: Complete (or Undo when already completed) plus
+    /// Delete — except habits, which get Done only (habit deletion deliberately
+    /// stays in the detail view) and complete via the per-day habit path inside
+    /// `complete(in:)`. Delete is the same immediate delete as the context menu.
+    private var rowSwipeActions: [RowSwipeAction] {
+        var actions = [
+            RowSwipeAction(
+                title: reminder.isCompleted ? "Undo" : (reminder.isHabit ? "Done" : "Complete"),
+                systemImage: reminder.isCompleted ? "arrow.uturn.backward" : "checkmark",
+                tint: AppColors.success
+            ) {
+                withAnimation(Constants.Animation.spring) {
+                    HapticManager.notification(reminder.isCompleted ? .warning : .success)
+                    if reminder.isCompleted {
+                        reminder.uncomplete(in: modelContext)
+                    } else {
+                        completeReminder()
+                    }
+                }
+            }
+        ]
+        if !reminder.isHabit {
+            actions.append(
+                RowSwipeAction(title: "Delete", systemImage: "trash", tint: AppColors.destructive) {
+                    withAnimation {
+                        modelContext.delete(reminder)
+                    }
+                }
+            )
+        }
+        return actions
     }
 
     private func completeReminder() {
