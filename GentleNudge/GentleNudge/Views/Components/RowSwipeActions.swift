@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Row Swipe Actions (custom swipe-to-reveal for card rows)
 
@@ -55,24 +58,20 @@ final class SwipeRowCoordinator {
 private struct RowSwipeActionsModifier: ViewModifier {
     let actions: [RowSwipeAction]
 
-    /// Whether the active drag was claimed as a horizontal swipe or permanently
-    /// handed to the enclosing scroll view. Decided ONCE per drag, at the first
-    /// update past the activation distance, so a vertical scroll can never
-    /// morph into a row swipe halfway through.
-    private enum DragClaim { case undecided, horizontal, rejected }
-
     /// Stable per-row identity for the one-open-row rule.
     @State private var rowID = UUID()
     /// Settled offset: 0 (closed) or `-revealWidth` (open).
     @State private var settledOffset: CGFloat = 0
     /// Live, already-clamped drag delta on top of `settledOffset`.
     @State private var dragDelta: CGFloat = 0
-    @State private var dragClaim: DragClaim = .undecided
 
     /// Width of one fully-revealed button.
     private let actionWidth: CGFloat = 72
     /// Snappy settle with no bounce past the target.
     private let snapAnimation = Animation.spring(response: 0.28, dampingFraction: 0.9)
+    /// How far a release's momentum is projected when deciding open vs. closed,
+    /// so a quick flick opens the row without dragging the whole way.
+    private let flickProjection: CGFloat = 0.2
 
     private var revealWidth: CGFloat { CGFloat(actions.count) * actionWidth }
     private var totalOffset: CGFloat { settledOffset + dragDelta }
@@ -104,7 +103,14 @@ private struct RowSwipeActionsModifier: ViewModifier {
                 revealedButtons
                     .allowsHitTesting(totalOffset < 0)
             }
-            .gesture(dragGesture)
+            .gesture(
+                RowRevealPan(
+                    onChange: { translationX in drag(to: translationX) },
+                    onEnd: { translationX, velocityX in
+                        endDrag(translationX: translationX, velocityX: velocityX)
+                    }
+                )
+            )
             // One-open-row rule: any other row claiming the coordinator closes
             // this one. (Reading `openRowID` here also registers the
             // @Observable dependency that makes this onChange fire.)
@@ -118,7 +124,6 @@ private struct RowSwipeActionsModifier: ViewModifier {
             .onDisappear {
                 settledOffset = 0
                 dragDelta = 0
-                dragClaim = .undecided
                 releaseCoordinator()
             }
     }
@@ -159,44 +164,28 @@ private struct RowSwipeActionsModifier: ViewModifier {
 
     // MARK: Drag
 
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
-            .onChanged { value in
-                switch dragClaim {
-                case .undecided:
-                    // Claim only horizontally-dominant movement; anything else
-                    // belongs to the vertical ScrollView — permanently, for
-                    // this drag.
-                    guard abs(value.translation.width) > abs(value.translation.height) else {
-                        dragClaim = .rejected
-                        return
-                    }
-                    dragClaim = .horizontal
-                    // Starting a swipe closes any other open row.
-                    SwipeRowCoordinator.shared.openRowID = rowID
-                case .rejected:
-                    return
-                case .horizontal:
-                    break
-                }
-                dragDelta = clampedTotal(settledOffset + value.translation.width) - settledOffset
-            }
-            .onEnded { value in
-                let claim = dragClaim
-                dragClaim = .undecided
-                guard claim == .horizontal else { return }
-                // Flick-friendly: project the momentum, then snap open past
-                // half the reveal width, closed otherwise.
-                let projected = settledOffset + value.predictedEndTranslation.width
-                let shouldOpen = projected < -revealWidth / 2
-                withAnimation(snapAnimation) {
-                    settledOffset = shouldOpen ? -revealWidth : 0
-                    dragDelta = 0
-                }
-                if !shouldOpen {
-                    releaseCoordinator()
-                }
-            }
+    /// Live drag update. Only ever called for a drag the recognizer has already
+    /// judged horizontal, with `translationX` measured from that moment.
+    private func drag(to translationX: CGFloat) {
+        // Starting a swipe closes any other open row.
+        if SwipeRowCoordinator.shared.openRowID != rowID {
+            SwipeRowCoordinator.shared.openRowID = rowID
+        }
+        dragDelta = clampedTotal(settledOffset + translationX) - settledOffset
+    }
+
+    private func endDrag(translationX: CGFloat, velocityX: CGFloat) {
+        // Flick-friendly: project the momentum, then snap open past half the
+        // reveal width, closed otherwise.
+        let released = clampedTotal(settledOffset + translationX)
+        let shouldOpen = released + velocityX * flickProjection < -revealWidth / 2
+        withAnimation(snapAnimation) {
+            settledOffset = shouldOpen ? -revealWidth : 0
+            dragDelta = 0
+        }
+        if !shouldOpen {
+            releaseCoordinator()
+        }
     }
 
     /// Piecewise clamp for the card's total offset: never right of closed, and
@@ -221,6 +210,123 @@ private struct RowSwipeActionsModifier: ViewModifier {
     private func releaseCoordinator() {
         if SwipeRowCoordinator.shared.openRowID == rowID {
             SwipeRowCoordinator.shared.openRowID = nil
+        }
+    }
+}
+
+// MARK: - Direction-locked pan
+
+/// The row's swipe gesture, as a real UIKit pan recognizer.
+///
+/// A SwiftUI `DragGesture` here competes with the enclosing `ScrollView`'s pan:
+/// whichever recognizes first cancels the other, so a vertical scroll started on
+/// a card would sometimes be swallowed by the row and the list wouldn't move —
+/// intermittently, depending on where and how the finger landed. A UIKit
+/// recognizer can express what SwiftUI's cannot: it refuses to begin at all
+/// unless the movement is clearly horizontal, and it never prevents (nor is
+/// prevented by) the scroll view's pan.
+private struct RowRevealPan: UIGestureRecognizerRepresentable {
+    /// Live horizontal translation, measured from the point the drag was judged
+    /// horizontal (so the card doesn't jump by the decision distance).
+    let onChange: (CGFloat) -> Void
+    /// Final translation plus horizontal velocity, for the open/close snap.
+    let onEnd: (CGFloat, CGFloat) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> RowRevealPanRecognizer {
+        let recognizer = RowRevealPanRecognizer()
+        recognizer.maximumNumberOfTouches = 1
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: RowRevealPanRecognizer, context: Context) {
+        // Until the drag is judged horizontal it belongs to the scroll view;
+        // the card must not move, and there is nothing to settle at the end.
+        guard recognizer.isHorizontalDrag else { return }
+        let translation = recognizer.translation(in: recognizer.view)
+        switch recognizer.state {
+        case .began, .changed:
+            onChange(translation.x)
+        case .ended, .cancelled, .failed:
+            onEnd(translation.x, recognizer.velocity(in: recognizer.view).x)
+        default:
+            break
+        }
+    }
+}
+
+/// Pan recognizer that claims only horizontally-dominant drags and leaves
+/// everything else to the enclosing scroll view.
+final class RowRevealPanRecognizer: UIPanGestureRecognizer {
+    /// Distance travelled before the drag's direction is judged — below this a
+    /// touch is too ambiguous to tell a swipe from the start of a scroll.
+    private let decisionDistance: CGFloat = 12
+    /// How much more horizontal than vertical the movement must be to count as
+    /// a swipe. Above 1 so the diagonal arc of a thumb scroll stays a scroll.
+    private let dominanceRatio: CGFloat = 1.3
+
+    /// True once this drag has been judged horizontal; the card only moves then.
+    private(set) var isHorizontalDrag = false
+
+    private var hasJudgedDirection = false
+    /// Scroll view frozen for the duration of a claimed swipe, restored in
+    /// `reset()` — which UIKit always calls, however the gesture ends.
+    private weak var lockedScrollView: UIScrollView?
+
+    // Stay out of UIKit's winner-takes-all arbitration in both directions: the
+    // scroll view's pan can't kill this recognizer, and this recognizer can't
+    // kill the scroll (which it hands the drag back to when it turns out
+    // vertical). Direction is decided below, on the movement itself.
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        guard !hasJudgedDirection, state == .began || state == .changed else { return }
+
+        let travel = translation(in: view)
+        guard max(abs(travel.x), abs(travel.y)) >= decisionDistance else { return }
+        hasJudgedDirection = true
+
+        guard abs(travel.x) >= abs(travel.y) * dominanceRatio else {
+            // Vertical or ambiguous: this is a scroll. Bow out for the rest of
+            // the drag — one decision per drag, so a scroll can never morph
+            // into a row swipe halfway through.
+            state = .cancelled
+            return
+        }
+
+        isHorizontalDrag = true
+        // Measure the card's travel from here, so it doesn't jump forward by
+        // the distance it took to judge the direction.
+        setTranslation(.zero, in: view)
+        lockEnclosingScrollView()
+    }
+
+    override func reset() {
+        super.reset()
+        hasJudgedDirection = false
+        isHorizontalDrag = false
+        lockedScrollView?.isScrollEnabled = true
+        lockedScrollView = nil
+    }
+
+    /// Freezes the nearest enclosing scroll view while the card is being
+    /// swiped, so vertical drift during a horizontal swipe doesn't also scroll
+    /// the list (the pair recognize simultaneously by design).
+    private func lockEnclosingScrollView() {
+        var candidate: UIView? = view
+        while let current = candidate {
+            if let scrollView = current as? UIScrollView, scrollView.isScrollEnabled {
+                scrollView.isScrollEnabled = false
+                lockedScrollView = scrollView
+                return
+            }
+            candidate = current.superview
         }
     }
 }
