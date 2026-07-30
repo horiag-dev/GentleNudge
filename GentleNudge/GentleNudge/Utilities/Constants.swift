@@ -145,6 +145,48 @@ enum Constants {
         /// Whether to use OpenAI's neural voice (when a key is configured).
         /// Default on; turning it off forces the built-in Apple system voice.
         static let neuralVoiceEnabled = "neuralVoiceEnabled"
+
+        // MARK: Calendar scanning
+
+        /// Whether to read the calendar and propose action items. Off until the
+        /// user opts in — the feature needs a system permission.
+        static let calendarScanEnabled = "calendarScanEnabled"
+
+        /// How many days ahead to look (default `defaultCalendarDaysAhead`).
+        static let calendarDaysAhead = "calendarDaysAhead"
+
+        /// Identifiers of the calendars to scan. Absent or empty = every calendar.
+        static let calendarSelectedIDs = "calendarSelectedCalendarIDs"
+
+        /// Day key of the last completed scan, gating the once-a-day auto scan.
+        static let calendarLastScanDay = "calendarLastScanDay"
+    }
+
+    // MARK: - Calendar scanning
+
+    /// Default look-ahead window. Seven days is what the user asked for: far
+    /// enough to still act on a birthday, near enough to stay relevant.
+    static let defaultCalendarDaysAhead = 7
+
+    /// Bounds the look-ahead so a hand-edited default can't ask for a year of
+    /// events (which would blow past the triage call's event cap).
+    static let calendarDaysAheadRange = 1...30
+
+    static var isCalendarScanEnabled: Bool {
+        UserDefaults.standard.bool(forKey: DefaultsKeys.calendarScanEnabled)
+    }
+
+    static var calendarDaysAhead: Int {
+        let stored = UserDefaults.standard.integer(forKey: DefaultsKeys.calendarDaysAhead)
+        guard stored != 0 else { return defaultCalendarDaysAhead }
+        return min(max(stored, calendarDaysAheadRange.lowerBound), calendarDaysAheadRange.upperBound)
+    }
+
+    /// The calendars to scan, or `nil` for "all of them" — which is both the
+    /// initial state and what an empty selection means.
+    static var calendarSelectedIDs: Set<String>? {
+        let stored = UserDefaults.standard.stringArray(forKey: DefaultsKeys.calendarSelectedIDs) ?? []
+        return stored.isEmpty ? nil : Set(stored)
     }
 
     // MARK: - UI

@@ -36,6 +36,15 @@ final class Category: Identifiable {
         self.isHabitCategory = isHabitCategory
     }
 
+    /// Whether this is the habits category. The counterpart to `Reminder.isHabit`
+    /// and spelled the same way: prefer the stable marker, keep the name fallback
+    /// for the window before `backfillHabitMarker` runs. Every "exclude the
+    /// Habits category" list filter goes through this so habits can never leak
+    /// into a category section on one platform but not the other.
+    var isHabits: Bool {
+        isHabitCategory || name == "Habits"
+    }
+
     var color: Color {
         switch colorName {
         case "red": return .red

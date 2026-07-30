@@ -823,11 +823,10 @@ final class ChatCoordinator {
     /// Neutralizes angle brackets in user-controlled snapshot text before it's
     /// embedded in the `<categories>` / `<memory>` delimited blocks, so a category
     /// name or memory containing `</memory>` can't close the block early and slip
-    /// out of the "user data, not instructions" framing. Uses look-alike single
-    /// angle quotes so the text stays readable to the model.
+    /// out of the "user data, not instructions" framing. Now shared with the
+    /// calendar triage prompt — see `PromptSafety`.
     private static func sanitizedForBlock(_ text: String) -> String {
-        text.replacingOccurrences(of: "<", with: "‹")
-            .replacingOccurrences(of: ">", with: "›")
+        PromptSafety.sanitizedForBlock(text)
     }
 
     // MARK: Wire history hygiene

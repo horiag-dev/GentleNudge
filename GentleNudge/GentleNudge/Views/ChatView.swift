@@ -46,7 +46,7 @@ struct ChatView: View {
     /// Categories a reminder can actually be filed under (excludes the habits
     /// category). Send is gated on at least one existing (§2.7).
     private var availableCategories: [Category] {
-        categories.filter { !$0.isHabitCategory && $0.name != "Habits" }
+        categories.filter { !$0.isHabits }
     }
 
     private var hasCategories: Bool { !availableCategories.isEmpty }

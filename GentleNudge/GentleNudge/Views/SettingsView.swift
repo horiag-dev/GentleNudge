@@ -65,6 +65,8 @@ struct SettingsView: View {
     /// Collapsed by default so the saved-memory list isn't always sitting open
     /// in Settings — the user expands it to review/manage what's remembered.
     @State private var showMemories = false
+    /// Drives the .fileImporter behind "Restore from a File…".
+    @State private var showingRestoreImporter = false
 
     enum SyncStatus {
         case idle
@@ -230,6 +232,61 @@ struct SettingsView: View {
                     Text("Display")
                 } footer: {
                     Text("Choose which habits appear in the daily checklist. \"Only selected\" shows just the habits you tick below. Hiding habits never deletes them — your habit history is kept.")
+                }
+
+                // MARK: - Calendar
+                CalendarSettingsSection()
+
+                // MARK: - Backups
+                Section {
+                    HStack {
+                        Label("Last Backup", systemImage: "clock.arrow.circlepath")
+                        Spacer()
+                        if let latest = backupList.first?.date {
+                            Text(latest.formatted(date: .abbreviated, time: .omitted))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("None yet")
+                                .foregroundStyle(AppColors.warning)
+                        }
+                    }
+
+                    Button {
+                        manualBackup()
+                    } label: {
+                        Label("Back Up Now", systemImage: "arrow.clockwise")
+                    }
+
+                    NavigationLink {
+                        BackupRestoreListView(
+                            backups: backupList,
+                            onRestore: { restoreBackup(from: $0) }
+                        )
+                    } label: {
+                        HStack {
+                            Label("Restore a Backup", systemImage: "clock.arrow.2.circlepath")
+                            Spacer()
+                            Text("\(backupList.count)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(backupList.isEmpty)
+
+                    Button {
+                        showingRestoreImporter = true
+                    } label: {
+                        Label("Restore from a File…", systemImage: "square.and.arrow.down")
+                    }
+
+                    Button {
+                        exportBackup()
+                    } label: {
+                        Label("Export a Copy…", systemImage: "square.and.arrow.up")
+                    }
+                } header: {
+                    Text("Backups")
+                } footer: {
+                    Text("Your reminders, categories, and the assistant's memory are saved to this device once a day, and the last \(BackupService.retentionDays) days are kept. Restoring only ever adds back what's missing — it never overwrites or deletes anything you have now, so it's safe to try.")
                 }
 
                 // MARK: - Manage
@@ -650,40 +707,6 @@ struct SettingsView: View {
                         Text("Sync your reminders to Apple's built-in Reminders app as a backup. A list called '\(Constants.appleRemindersListName)' will be created.")
                     }
 
-                // Automatic Backups
-                Section {
-                    HStack {
-                        Label("Auto Backup", systemImage: "clock.arrow.circlepath")
-                        Spacer()
-                        Text("Daily, 7 days")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if backupList.isEmpty {
-                        Text("No backups yet")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(backupList, id: \.url) { backup in
-                            HStack {
-                                Text(backup.date.formatted(date: .abbreviated, time: .omitted))
-                                Spacer()
-                                Text(formatFileSize(backup.size))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    Button {
-                        manualBackup()
-                    } label: {
-                        Label("Backup Now", systemImage: "arrow.clockwise")
-                    }
-                } header: {
-                    Text("Local Backups")
-                } footer: {
-                    Text("Backups are saved automatically each day. Last 7 days are kept.")
-                }
-
                 // Data Management
                 Section {
                     Button {
@@ -744,6 +767,32 @@ struct SettingsView: View {
             .listStyle(.inset(alternatesRowBackgrounds: false))
             #endif
             .navigationTitle("Settings")
+            .fileImporter(
+                isPresented: $showingRestoreImporter,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    // A file picked outside the sandbox needs an explicit security
+                    // scope, and it has to be held across the READ — so the bytes
+                    // are loaded here, synchronously, not inside a later Task.
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        restore(data: try Data(contentsOf: url))
+                    } catch {
+                        backupAlertMessage = "Could not read that file: \(error.localizedDescription)"
+                        backupAlertIsError = true
+                        showingBackupAlert = true
+                    }
+                case .failure(let error):
+                    backupAlertMessage = error.localizedDescription
+                    backupAlertIsError = true
+                    showingBackupAlert = true
+                }
+            }
             .alert("Sync Result", isPresented: $showingSyncAlert) {
                 Button("OK") {}
             } message: {
@@ -855,25 +904,71 @@ struct SettingsView: View {
         Task {
             // Snapshot the @Model fields on the main actor BEFORE hopping to the
             // backup actor — it must never read live models off the main thread.
-            let backupSnapshots = reminders.map(BackupService.ReminderBackupSnapshot.init)
+            let reminderSnapshots = reminders.map(ReminderBackupSnapshot.init)
+            let categorySnapshots = categories.map(CategoryBackupSnapshot.init)
+            let memorySnapshots = memories.map(MemoryBackupSnapshot.init)
             do {
-                try await BackupService.shared.performDailyBackup(reminders: backupSnapshots)
+                // A snapshot already exists for today unless this is the first run
+                // of the day; say which happened rather than implying a new file.
+                let wrote = try await BackupService.shared.performDailyBackup(
+                    reminders: reminderSnapshots,
+                    categories: categorySnapshots,
+                    memories: memorySnapshots
+                )
                 loadBackupList()
-                await MainActor.run {
-                    backupAlertMessage = "Backup created successfully with \(reminders.count) reminders."
-                    backupAlertIsError = false
-                    showingBackupAlert = true
-                    HapticManager.notification(.success)
-                }
+                backupAlertMessage = wrote
+                    ? "Backed up \(reminders.count) reminders, \(categories.count) categories, and \(memories.count) memories."
+                    : "Today's backup is already saved (\(reminders.count) reminders)."
+                backupAlertIsError = false
+                showingBackupAlert = true
+                HapticManager.notification(.success)
             } catch {
-                await MainActor.run {
-                    backupAlertMessage = "Backup failed: \(error.localizedDescription)"
-                    backupAlertIsError = true
-                    showingBackupAlert = true
-                    HapticManager.notification(.error)
-                }
+                backupAlertMessage = "Backup failed: \(error.localizedDescription)"
+                backupAlertIsError = true
+                showingBackupAlert = true
+                HapticManager.notification(.error)
             }
         }
+    }
+
+    /// Restores one of our own daily snapshots. Additive only — see `BackupRestore`.
+    private func restoreBackup(from url: URL) {
+        Task {
+            do {
+                let contents = try await BackupService.shared.loadBackup(at: url)
+                applyRestore(contents)
+            } catch {
+                reportRestoreFailure(error)
+            }
+        }
+    }
+
+    /// Restores from bytes the user picked with the file importer.
+    private func restore(data: Data) {
+        do {
+            applyRestore(try BackupService.decode(data))
+        } catch {
+            reportRestoreFailure(error)
+        }
+    }
+
+    private func applyRestore(_ contents: BackupContents) {
+        do {
+            let summary = try BackupRestore.apply(contents, to: modelContext)
+            backupAlertMessage = summary.message
+            backupAlertIsError = false
+            showingBackupAlert = true
+            HapticManager.notification(.success)
+        } catch {
+            reportRestoreFailure(error)
+        }
+    }
+
+    private func reportRestoreFailure(_ error: Error) {
+        backupAlertMessage = error.localizedDescription
+        backupAlertIsError = true
+        showingBackupAlert = true
+        HapticManager.notification(.error)
     }
 
     private func formatFileSize(_ size: Int64) -> String {
@@ -883,38 +978,26 @@ struct SettingsView: View {
     }
 
     private func exportBackup() {
-        var backupData: [[String: Any]] = []
-
-        for reminder in reminders {
-            var item: [String: Any] = [
-                "id": reminder.id.uuidString,
-                "title": reminder.title,
-                "notes": reminder.notes,
-                "priority": reminder.priorityRaw,
-                "isCompleted": reminder.isCompleted,
-                "createdAt": reminder.createdAt.timeIntervalSince1970,
-                "recurrence": reminder.recurrenceRaw
-            ]
-
-            if let dueDate = reminder.dueDate {
-                item["dueDate"] = dueDate.timeIntervalSince1970
+        // The exported file is byte-identical in format to a daily backup, so
+        // anything exported here can be restored through the same path. The old
+        // hand-rolled export produced a shape nothing could read back.
+        let reminderSnapshots = reminders.map(ReminderBackupSnapshot.init)
+        let categorySnapshots = categories.map(CategoryBackupSnapshot.init)
+        let memorySnapshots = memories.map(MemoryBackupSnapshot.init)
+        Task {
+            do {
+                let data = try await BackupService.shared.makeExportData(
+                    reminders: reminderSnapshots,
+                    categories: categorySnapshots,
+                    memories: memorySnapshots
+                )
+                exportDocument = BackupDocument(data: data)
+                showingExporter = true
+            } catch {
+                backupAlertMessage = error.localizedDescription
+                backupAlertIsError = true
+                showingBackupAlert = true
             }
-            if let completedAt = reminder.completedAt {
-                item["completedAt"] = completedAt.timeIntervalSince1970
-            }
-            if let aiDescription = reminder.aiEnhancedDescription {
-                item["aiEnhancedDescription"] = aiDescription
-            }
-            if let category = reminder.category {
-                item["categoryName"] = category.name
-            }
-
-            backupData.append(item)
-        }
-
-        if let jsonData = try? JSONSerialization.data(withJSONObject: backupData, options: .prettyPrinted) {
-            exportDocument = BackupDocument(data: jsonData)
-            showingExporter = true
         }
     }
 
@@ -1767,6 +1850,12 @@ struct BackupDocument: FileDocument {
 }
 
 #Preview {
+    let container = try! ModelContainer(
+        for: Reminder.self, Category.self, UserMemory.self,
+        CalendarSuggestion.self, CalendarAutoRule.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
     SettingsView()
-        .modelContainer(for: [Reminder.self, Category.self, UserMemory.self], inMemory: true)
+        .modelContainer(container)
+        .environment(CalendarScanCoordinator(modelContainer: container))
 }

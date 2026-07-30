@@ -23,6 +23,12 @@ struct GentleNudgeApp: App {
     /// shared container.
     @State private var chatCoordinator: ChatCoordinator
 
+    /// Owned here for the same reason as `chatCoordinator`: the calendar scan is
+    /// kicked off from whichever Today view is on screen, but its state (scanning,
+    /// last outcome, the one-shot learning notice) has to outlive a tab change or
+    /// the macOS detail-column swap.
+    @State private var calendarCoordinator: CalendarScanCoordinator
+
     init() {
         // One-time launch migration (alongside the habit-marker backfill below):
         // seed the three-way habit-visibility mode from the legacy boolean.
@@ -31,6 +37,7 @@ struct GentleNudgeApp: App {
         let container = Self.makeSharedModelContainer()
         self.sharedModelContainer = container
         _chatCoordinator = State(initialValue: ChatCoordinator(modelContainer: container))
+        _calendarCoordinator = State(initialValue: CalendarScanCoordinator(modelContainer: container))
     }
 
     private static func makeSharedModelContainer() -> ModelContainer {
@@ -38,6 +45,8 @@ struct GentleNudgeApp: App {
             Reminder.self,
             Category.self,
             UserMemory.self,
+            CalendarSuggestion.self,
+            CalendarAutoRule.self,
         ])
 
         // Try CloudKit first, fall back to local storage if not configured
@@ -218,6 +227,7 @@ struct GentleNudgeApp: App {
                 #endif
             }
             .environment(chatCoordinator)
+            .environment(calendarCoordinator)
         }
         .modelContainer(sharedModelContainer)
         #if os(macOS)

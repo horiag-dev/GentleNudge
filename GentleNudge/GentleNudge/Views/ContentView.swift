@@ -20,6 +20,7 @@ import UIKit
 /// The native `TabView` is kept underneath (hidden system bar) so tab lifecycle
 /// and state preservation behave exactly as before.
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(ChatCoordinator.self) private var coordinator
     @Query private var reminders: [Reminder]
@@ -146,15 +147,7 @@ struct ContentView: View {
         }
         #endif
         .task {
-            // Perform daily backup on app launch. Snapshot the @Model fields on
-            // the main actor FIRST — the backup actor must never touch live
-            // models (or their category relationship) off the main thread.
-            let backupSnapshots = reminders.map(BackupService.ReminderBackupSnapshot.init)
-            do {
-                try await BackupService.shared.performDailyBackup(reminders: backupSnapshots)
-            } catch {
-                print("Backup failed: \(error.localizedDescription)")
-            }
+            await DailyBackup.run(context: modelContext)
 
             #if os(iOS)
             // Update badge and scheduled notification content on launch

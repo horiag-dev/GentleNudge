@@ -7,8 +7,10 @@ import SwiftData
 struct MacContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(CalendarScanCoordinator.self) private var calendarCoordinator
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
+    @Query private var calendarSuggestions: [CalendarSuggestion]
 
     @State private var selectedSidebarItem: SidebarItem? = .today
     @State private var selectedReminder: Reminder?
@@ -25,6 +27,16 @@ struct MacContentView: View {
     /// Three-way habit surfacing mode (replaces the old show/hide boolean).
     private var habitVisibility: HabitVisibility {
         HabitVisibility(rawValue: habitVisibilityRaw) ?? .all
+    }
+
+    /// Calendar proposals waiting on a yes/no (same list and order as iOS).
+    private var calendarPending: [CalendarSuggestion] {
+        CalendarSuggestion.pending(from: calendarSuggestions)
+    }
+
+    /// Calendar items added automatically today, shown with an Undo.
+    private var calendarAutoAdded: [CalendarSuggestion] {
+        CalendarSuggestion.autoAddedToday(from: calendarSuggestions)
     }
 
     /// The sidebar search field's text, trimmed. Non-empty filters the current
@@ -115,12 +127,17 @@ struct MacContentView: View {
             if let categoryID = reminder.category?.id {
                 categoryIDsWithActive.insert(categoryID)
             }
-            if reminder.isRecurring {
-                lists.recurring.append(reminder)
-            }
+            // Habits leave the pass here, BEFORE any of the general-purpose
+            // lists — matching iOS, where a habit only ever reaches the Habits
+            // section. Every habit is daily-recurring, so testing `isRecurring`
+            // first used to file all of them into the Recurring smart list,
+            // where they stayed visible even under "Hide habits".
             if reminder.isHabit {
                 lists.habits.append(reminder)
                 continue
+            }
+            if reminder.isRecurring {
+                lists.recurring.append(reminder)
             }
             lists.allActive.append(reminder)
             if reminder.dueDate != nil {
@@ -188,7 +205,7 @@ struct MacContentView: View {
         }
 
         lists.categoriesWithReminders = categories.filter {
-            $0.name != "Habits" && categoryIDsWithActive.contains($0.id)
+            !$0.isHabits && categoryIDsWithActive.contains($0.id)
         }
         return lists
     }
@@ -276,7 +293,7 @@ struct MacContentView: View {
                 // My Lists
                 List(selection: $selectedSidebarItem) {
                     Section("My Lists") {
-                        ForEach(categories.filter { $0.name != "Habits" }) { category in
+                        ForEach(categories.filter { !$0.isHabits }) { category in
                             Label {
                                 HStack {
                                     Text(category.name)
@@ -395,9 +412,20 @@ struct MacContentView: View {
         .task {
             await briefingVM.refreshIfNeeded(reminders: reminderSummaries)
         }
+        // Once-a-day calendar pass, gated inside the coordinator. Its own task so
+        // a slow triage call can't hold up the briefing.
+        .task {
+            await calendarCoordinator.scanIfNeeded()
+        }
+        // Daily local snapshot. The Mac used to skip this entirely (only the iOS
+        // root called it), so a Mac-only day left no backup behind.
+        .task {
+            await DailyBackup.run(context: modelContext)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
+                Task { await calendarCoordinator.scanIfNeeded() }
             }
         }
         .onChange(of: reminders) { _, _ in
@@ -412,6 +440,19 @@ struct MacContentView: View {
             }
             // Data may finish loading (e.g. CloudKit sync) after the first pass.
             Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
+        }
+        // The app changing what it does unasked has to be announced once, not
+        // discovered later in Settings.
+        .alert(
+            "Noted",
+            isPresented: Binding(
+                get: { calendarCoordinator.learningNotice != nil },
+                set: { if !$0 { calendarCoordinator.learningNotice = nil } }
+            )
+        ) {
+            Button("OK") { calendarCoordinator.learningNotice = nil }
+        } message: {
+            Text(calendarCoordinator.learningNotice ?? "")
         }
     }
 
@@ -428,7 +469,9 @@ struct MacContentView: View {
                 // All-clear state
                 if lists.visibleHabits.isEmpty
                     && lists.needsAttention.isEmpty
-                    && lists.categoriesWithReminders.isEmpty {
+                    && lists.categoriesWithReminders.isEmpty
+                    && calendarPending.isEmpty
+                    && calendarAutoAdded.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "checkmark.circle")
                             .font(.system(size: 48))
@@ -438,6 +481,15 @@ struct MacContentView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.top, 80)
+                }
+
+                // Action items derived from the calendar (same placement as iOS:
+                // above Needs Attention, since an event date can't be moved).
+                if !calendarPending.isEmpty || !calendarAutoAdded.isEmpty {
+                    CalendarSuggestionsSection(
+                        pending: calendarPending,
+                        autoAddedToday: calendarAutoAdded
+                    )
                 }
 
                 // Habits Section
@@ -1150,7 +1202,7 @@ struct MacReminderDetailPanel: View {
                             }
                         }
                         FlowLayout(spacing: 6) {
-                            ForEach(categories.filter { $0.name != "Habits" }) { category in
+                            ForEach(categories.filter { !$0.isHabits }) { category in
                                 CategoryPill(
                                     category: category,
                                     isSelected: reminder.category?.id == category.id,
@@ -1378,7 +1430,13 @@ struct MacSettingsSheet: View {
 }
 
 #Preview {
+    let container = try! ModelContainer(
+        for: Reminder.self, Category.self, UserMemory.self,
+        CalendarSuggestion.self, CalendarAutoRule.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
     MacContentView()
-        .modelContainer(for: [Reminder.self, Category.self, UserMemory.self], inMemory: true)
+        .modelContainer(container)
+        .environment(CalendarScanCoordinator(modelContainer: container))
 }
 #endif

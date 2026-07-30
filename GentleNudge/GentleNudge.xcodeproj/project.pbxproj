@@ -51,12 +51,18 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				GentleNudgeApp.swift,
+				Models/CalendarSuggestion.swift,
 				Models/Category.swift,
 				Models/Reminder.swift,
 				Models/UserMemory.swift,
 				Services/AnthropicClient.swift,
 				Services/AppleRemindersService.swift,
 				Services/BackupService.swift,
+				Services/BackupRestore.swift,
+				Services/CalendarScanCoordinator.swift,
+				Services/CalendarService.swift,
+				Services/CalendarTriageService.swift,
+				Services/DailyBackup.swift,
 				Services/ChatCoordinator.swift,
 				Services/ChatTools.swift,
 				Services/ClaudeService.swift,
@@ -72,9 +78,12 @@
 				Utilities/KeychainHelper.swift,
 				Views/AddReminderView.swift,
 				Views/AllRemindersView.swift,
+				Views/BackupRestoreListView.swift,
+				Views/CalendarSettingsSection.swift,
 				Views/CategoriesView.swift,
 				Views/ChatView.swift,
 				Views/Components/AIEnhanceButton.swift,
+				Views/Components/CalendarSuggestionViews.swift,
 				Views/Components/CategoryChip.swift,
 				Views/Components/ChatComponents.swift,
 				Views/Components/RecurrencePicker.swift,
@@ -533,6 +542,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Gentle Nudge reads your upcoming events and birthdays so it can suggest action items. It never changes your calendar.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Gentle Nudge reads your upcoming events and birthdays so it can suggest action items. It never changes your calendar.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GentleNudge uses the microphone so you can speak to the assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "GentleNudge converts your speech to text so you can dictate reminders.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -540,7 +551,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = "Horia.Gentle-Nudge";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -564,6 +575,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Gentle Nudge reads your upcoming events and birthdays so it can suggest action items. It never changes your calendar.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Gentle Nudge reads your upcoming events and birthdays so it can suggest action items. It never changes your calendar.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "GentleNudge uses the microphone so you can speak to the assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "GentleNudge converts your speech to text so you can dictate reminders.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -571,7 +584,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = "Horia.Gentle-Nudge";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -590,7 +603,7 @@
 				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = "Horia.Gentle-NudgeTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -609,7 +622,7 @@
 				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = "Horia.Gentle-NudgeTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -627,7 +640,7 @@
 				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = "Horia.Gentle-NudgeUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -645,7 +658,7 @@
 				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = "Horia.Gentle-NudgeUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -796,7 +809,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = com.HoriaGalatanu.GentleNudge;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -827,7 +840,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = com.HoriaGalatanu.GentleNudge;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -845,7 +858,7 @@
 				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = Horia.GentleNudgeTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -864,7 +877,7 @@
 				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = Horia.GentleNudgeTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -881,7 +894,7 @@
 				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = Horia.GentleNudgeUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -898,7 +911,7 @@
 				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = ZJ8SR8PR2N;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.2.10;
+				MARKETING_VERSION = 1.2.11;
 				PRODUCT_BUNDLE_IDENTIFIER = Horia.GentleNudgeUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;

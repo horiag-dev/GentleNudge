@@ -6,6 +6,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Gentle Nudge reads your upcoming events and birthdays so it can suggest action items. It never changes your calendar.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Gentle Nudge reads your upcoming events and birthdays so it can suggest action items. It never changes your calendar.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>GentleNudge uses the microphone so you can speak to the assistant.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

@@ -4,8 +4,10 @@ import SwiftData
 struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(CalendarScanCoordinator.self) private var calendarCoordinator
     @Query private var reminders: [Reminder]
     @Query(sort: \Category.sortOrder) private var categories: [Category]
+    @Query private var calendarSuggestions: [CalendarSuggestion]
 
     @State private var searchText = ""
     @State private var briefingVM = MorningBriefingViewModel()
@@ -18,6 +20,17 @@ struct TodayView: View {
     /// Three-way habit surfacing mode (replaces the old show/hide boolean).
     private var habitVisibility: HabitVisibility {
         HabitVisibility(rawValue: habitVisibilityRaw) ?? .all
+    }
+
+    /// Calendar proposals waiting on a yes/no.
+    private var calendarPending: [CalendarSuggestion] {
+        CalendarSuggestion.pending(from: calendarSuggestions)
+    }
+
+    /// Calendar items added automatically today — shown with an Undo so an
+    /// unattended add is never a surprise the user can't take back.
+    private var calendarAutoAdded: [CalendarSuggestion] {
+        CalendarSuggestion.autoAddedToday(from: calendarSuggestions)
     }
 
     /// Lightweight, Sendable snapshots for the once-a-day briefing.
@@ -220,6 +233,17 @@ struct TodayView: View {
                         HabitsSection(habits: data.habits)
                     }
 
+                    // Action items the assistant derived from the calendar —
+                    // above Needs Attention because they're time-boxed by an
+                    // event date the user can't move. Hidden while searching
+                    // (the section doesn't read the query).
+                    if searchText.isEmpty, !calendarPending.isEmpty || !calendarAutoAdded.isEmpty {
+                        CalendarSuggestionsSection(
+                            pending: calendarPending,
+                            autoAddedToday: calendarAutoAdded
+                        )
+                    }
+
                     // Urgent / Time-sensitive / High Priority - grouped by category
                     if !data.needsAttention.isEmpty {
                         VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
@@ -279,7 +303,7 @@ struct TodayView: View {
                     }
 
                     // Categories with reminders
-                    ForEach(categories.filter { $0.name != "Habits" }) { category in
+                    ForEach(categories.filter { !$0.isHabits }) { category in
                         let categoryReminders = data.byCategory[category.id] ?? []
                         if !categoryReminders.isEmpty {
                             HomeCategorySection(
@@ -336,14 +360,33 @@ struct TodayView: View {
         .task {
             await briefingVM.refreshIfNeeded(reminders: reminderSummaries)
         }
+        // Once-a-day calendar pass, gated inside the coordinator. Separate task
+        // so a slow triage call can't hold up the briefing.
+        .task {
+            await calendarCoordinator.scanIfNeeded()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
+                Task { await calendarCoordinator.scanIfNeeded() }
             }
         }
         .onChange(of: reminders) { _, _ in
             // Data may finish loading (e.g. CloudKit sync) after the first pass.
             Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
+        }
+        // The app changing what it does unasked has to be announced once, not
+        // discovered later in Settings.
+        .alert(
+            "Noted",
+            isPresented: Binding(
+                get: { calendarCoordinator.learningNotice != nil },
+                set: { if !$0 { calendarCoordinator.learningNotice = nil } }
+            )
+        ) {
+            Button("OK") { calendarCoordinator.learningNotice = nil }
+        } message: {
+            Text(calendarCoordinator.learningNotice ?? "")
         }
     }
 }
@@ -1282,6 +1325,11 @@ struct CategoryDetailView: View {
 }
 
 #Preview {
+    let container = try! ModelContainer(
+        for: Reminder.self, Category.self, CalendarSuggestion.self, CalendarAutoRule.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
     TodayView()
-        .modelContainer(for: [Reminder.self, Category.self], inMemory: true)
+        .modelContainer(container)
+        .environment(CalendarScanCoordinator(modelContainer: container))
 }
