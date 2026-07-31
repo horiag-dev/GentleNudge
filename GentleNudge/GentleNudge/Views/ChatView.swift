@@ -84,6 +84,28 @@ struct ChatView: View {
         .onChange(of: focusTrigger) { _, _ in
             focusInputIfReady()
         }
+        // "Chat about this" on a reminder hands over a prepared context line.
+        // Consume it here (and clear it) so the same draft can't be re-applied
+        // on a later re-render, and so anything the user had half-typed is
+        // preserved rather than overwritten.
+        .onChange(of: coordinator.pendingDraft) { _, newDraft in
+            adoptPendingDraft(newDraft)
+        }
+        .onAppear {
+            // The draft is usually set before this view appears (iOS switches to
+            // the Assistant tab in the same turn), so onChange alone would miss it.
+            adoptPendingDraft(coordinator.pendingDraft)
+        }
+    }
+
+    /// Moves a pending draft into the composer and focuses it. Appends rather
+    /// than replaces when the user already had text in flight.
+    private func adoptPendingDraft(_ pending: String?) {
+        guard let pending, !pending.isEmpty else { return }
+        let existing = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = existing.isEmpty ? pending : "\(existing)\n\(pending)"
+        coordinator.pendingDraft = nil
+        focusInputIfReady()
     }
 
     // MARK: Header

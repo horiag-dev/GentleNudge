@@ -88,11 +88,6 @@ enum Constants {
     /// Default neural voice when the user hasn't picked one.
     static let defaultTTSVoice = TTSVoice.coral
 
-    /// Model for the existing AI enhancement (reminder polish) feature.
-    /// Was `claude-sonnet-4-20250514`, which was retired on 2026-06-15; replaced
-    /// with its official successor, `claude-sonnet-5`.
-    static let claudeModel = "claude-sonnet-5"
-
     // MARK: - Chat Assistant
     // User-configurable model + reasoning effort for the conversational chat
     // assistant (later increments). Stored in UserDefaults; the Settings UI binds

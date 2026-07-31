@@ -88,16 +88,15 @@ struct SettingsView: View {
     /// One-pass counts for the Statistics section (was five separate full-array
     /// filters per render). "Active" excludes habits + completed, matching every
     /// other surface in the app (habits are perpetual, never "completed").
-    private var reminderStats: (total: Int, active: Int, completed: Int, overdue: Int, aiEnhanced: Int) {
-        var total = 0, active = 0, completed = 0, overdue = 0, aiEnhanced = 0
+    private var reminderStats: (total: Int, active: Int, completed: Int, overdue: Int) {
+        var total = 0, active = 0, completed = 0, overdue = 0
         for r in reminders {
             total += 1
             if r.isCompleted { completed += 1 }
             else if !r.isHabit { active += 1 }
             if r.isOverdue { overdue += 1 }
-            if r.aiEnhancedDescription != nil { aiEnhanced += 1 }
         }
-        return (total, active, completed, overdue, aiEnhanced)
+        return (total, active, completed, overdue)
     }
 
     /// The marketing version (e.g. "1.2.5") from the bundle — comes from
@@ -355,7 +354,7 @@ struct SettingsView: View {
                 } header: {
                     Text("AI Enhancement")
                 } footer: {
-                    Text("Enter your Claude API key to enable AI features like reminder enhancement and category suggestions.")
+                    Text("Enter your Claude API key to enable the assistant, voice mode, calendar suggestions, and the morning briefing.")
                 }
 
                 // Assistant
@@ -499,7 +498,6 @@ struct SettingsView: View {
                     StatRow(title: "Active", value: "\(stats.active)")
                     StatRow(title: "Completed", value: "\(stats.completed)")
                     StatRow(title: "Overdue", value: "\(stats.overdue)")
-                    StatRow(title: "AI Enhanced", value: "\(stats.aiEnhanced)")
                 }
 
                 // About

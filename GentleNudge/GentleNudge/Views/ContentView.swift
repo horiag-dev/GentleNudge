@@ -117,6 +117,12 @@ struct ContentView: View {
         .onChange(of: selectedTab) { _, newTab in
             if newTab == 1 { assistantFocusTrigger += 1 }
         }
+        // "Chat about this" on a reminder stages a composer draft; a non-nil
+        // draft is the signal to bring the Assistant forward. ChatView consumes
+        // and clears it. (macOS needs no equivalent — its chat is always docked.)
+        .onChange(of: coordinator.pendingDraft) { _, draft in
+            if draft != nil { selectedTab = 1 }
+        }
         // In-memory fallback = silent data loss. A Settings row alone isn't a
         // signal anyone sees, so surface a persistent (dismissible-per-launch)
         // banner above whatever tab is showing. The storage mode is fixed at

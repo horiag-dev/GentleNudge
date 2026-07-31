@@ -13,11 +13,7 @@ struct AddReminderView: View {
     @State private var dueDate: Date?
     @State private var recurrence: RecurrenceType = .none
 
-    @State private var isEnhancing = false
-    @State private var aiContext = ""
     @State private var showingDatePicker = false
-    @State private var showingAIError = false
-    @State private var aiErrorMessage = ""
 
     // Quick date selection helpers
     private var isDateToday: Bool {
@@ -87,55 +83,6 @@ struct AddReminderView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
                                     }
                                 }
-                            }
-                        }
-                    }
-
-                    // Polish Button (fix typos, extract link info)
-                    if Constants.isAPIKeyConfigured {
-                        VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                            HStack {
-                                Button {
-                                    polishWithAI()
-                                } label: {
-                                    HStack(spacing: Constants.Spacing.xs) {
-                                        if isEnhancing {
-                                            ProgressView()
-                                                .scaleEffect(0.8)
-                                        } else {
-                                            Image(systemName: "wand.and.stars")
-                                        }
-                                        Text("Polish")
-                                    }
-                                    .font(.subheadline)
-                                    .padding(.horizontal, Constants.Spacing.sm)
-                                    .padding(.vertical, Constants.Spacing.xs)
-                                    .background(Color.purple.opacity(0.15))
-                                    .foregroundStyle(.purple)
-                                    .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || isEnhancing)
-
-                                Spacer()
-
-                                Text("Fix typos & extract link info")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                            }
-
-                            // Show link info if extracted
-                            if !aiContext.isEmpty {
-                                HStack(alignment: .top, spacing: Constants.Spacing.sm) {
-                                    Image(systemName: "link.circle.fill")
-                                        .foregroundStyle(.blue)
-                                    Text(aiContext)
-                                        .font(.subheadline)
-                                }
-                                .padding()
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.blue.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
                             }
                         }
                     }
@@ -250,11 +197,6 @@ struct AddReminderView: View {
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || selectedCategory == nil)
                 }
             }
-            .alert("Polish Failed", isPresented: $showingAIError) {
-                Button("OK") {}
-            } message: {
-                Text(aiErrorMessage)
-            }
         }
     }
 
@@ -267,51 +209,11 @@ struct AddReminderView: View {
             recurrence: dueDate != nil ? recurrence : .none
         )
 
-        if !aiContext.isEmpty {
-            reminder.aiEnhancedDescription = aiContext
-        }
-
         modelContext.insert(reminder)
         HapticManager.notification(.success)
         dismiss()
     }
 
-    private func polishWithAI() {
-        guard !title.isEmpty else { return }
-
-        isEnhancing = true
-        Task {
-            do {
-                let polished = try await ClaudeService.shared.polishReminder(
-                    title: title,
-                    notes: notes
-                )
-
-                await MainActor.run {
-                    withAnimation {
-                        // Update title if changed (typos fixed)
-                        if polished.title != title {
-                            title = polished.title
-                        }
-
-                        // Store link info if present
-                        if let linkInfo = polished.linkInfo {
-                            aiContext = linkInfo
-                        }
-                    }
-                    HapticManager.notification(.success)
-                    isEnhancing = false
-                }
-            } catch {
-                await MainActor.run {
-                    isEnhancing = false
-                    aiErrorMessage = error.localizedDescription
-                    showingAIError = true
-                    HapticManager.notification(.error)
-                }
-            }
-        }
-    }
 }
 
 struct QuickDateButton: View {

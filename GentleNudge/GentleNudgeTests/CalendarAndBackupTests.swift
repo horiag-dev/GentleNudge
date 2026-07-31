@@ -828,3 +828,62 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertEqual(summary.message, "That backup was empty.")
     }
 }
+
+// MARK: - "Chat about this todo" hand-off
+
+/// The prefill replaced the old one-shot "Polish" action. It must name the
+/// reminder precisely enough for the assistant to find it with `find_reminders`,
+/// and it must stay a *draft* — staging text costs nothing, sending does.
+@MainActor
+final class ChatAboutReminderTests: XCTestCase {
+
+    private func makeCoordinator() throws -> ChatCoordinator {
+        let container = try ModelContainer(
+            for: Reminder.self, GentleNudge_iOS.Category.self, UserMemory.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        return ChatCoordinator(modelContainer: container)
+    }
+
+    func test_startChat_includesTitleCategoryAndDueDate() throws {
+        let coordinator = try makeCoordinator()
+        let category = GentleNudge_iOS.Category(name: "Misc", icon: "tray.fill", colorName: "mint")
+        let due = ReminderRepository.parseDate("2026-08-12", timeZone: .current)!
+        let reminder = Reminder(title: "Renew passport", dueDate: due, category: category)
+
+        coordinator.startChat(about: reminder)
+
+        let draft = try XCTUnwrap(coordinator.pendingDraft)
+        XCTAssertTrue(draft.contains("Renew passport"))
+        XCTAssertTrue(draft.contains("Misc"))
+        XCTAssertTrue(draft.contains("Aug 12"))
+        // Ends open so the user types their actual question.
+        XCTAssertTrue(draft.hasSuffix(": "))
+    }
+
+    func test_startChat_bareReminder_hasNoEmptyParentheses() throws {
+        let coordinator = try makeCoordinator()
+        coordinator.startChat(about: Reminder(title: "Think about it"))
+
+        let draft = try XCTUnwrap(coordinator.pendingDraft)
+        XCTAssertEqual(draft, "About \"Think about it\": ")
+    }
+
+    func test_startChat_categoryOnly_omitsDueDate() throws {
+        let coordinator = try makeCoordinator()
+        let category = GentleNudge_iOS.Category(name: "House", icon: "house.fill", colorName: "green")
+        coordinator.startChat(about: Reminder(title: "Fix the sink", category: category))
+
+        let draft = try XCTUnwrap(coordinator.pendingDraft)
+        XCTAssertEqual(draft, "About \"Fix the sink\" (House): ")
+    }
+
+    /// Staging a draft must not start a turn — the whole point of prefilling.
+    func test_startChat_doesNotSendOrStartATurn() throws {
+        let coordinator = try makeCoordinator()
+        coordinator.startChat(about: Reminder(title: "Renew passport"))
+
+        XCTAssertFalse(coordinator.isRunning)
+        XCTAssertTrue(coordinator.transcript.isEmpty)
+    }
+}

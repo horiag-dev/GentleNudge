@@ -302,10 +302,6 @@ actor AppleRemindersService {
             notes += "\n\n[Category: \(category.name)]"
         }
 
-        if let aiDescription = reminder.aiEnhancedDescription {
-            notes += "\n\n[AI Context: \(aiDescription)]"
-        }
-
         return notes
     }
 

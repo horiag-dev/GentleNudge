@@ -4,6 +4,7 @@ import SwiftData
 struct ReminderDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(ChatCoordinator.self) private var coordinator
 
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
@@ -34,11 +35,8 @@ struct ReminderDetailView: View {
         case notes
     }
 
-    @State private var isEnhancing = false
     @State private var showDeleteConfirmation = false
     @State private var showingDatePicker: Bool = false
-    @State private var showingAIError = false
-    @State private var aiErrorMessage = ""
 
     private var isDateToday: Bool {
         guard let dueDate = reminder.dueDate else { return false }
@@ -184,53 +182,38 @@ struct ReminderDetailView: View {
                     }
                 }
 
-                // Polish (fix typos, extract link info)
+                // Ask the assistant about this specific reminder. Replaces the
+                // old "Polish" action: rewriting a title the user already wrote
+                // was a narrow, one-shot use of the model, where a conversation
+                // scoped to this item can break it down, research it, reschedule
+                // it, or just answer a question about it.
                 if Constants.isAPIKeyConfigured {
-                    VStack(alignment: .leading, spacing: Constants.Spacing.sm) {
-                        HStack {
-                            Button {
-                                polishWithAI()
-                            } label: {
-                                HStack(spacing: Constants.Spacing.xs) {
-                                    if isEnhancing {
-                                        ProgressView()
-                                            .scaleEffect(0.8)
-                                    } else {
-                                        Image(systemName: "wand.and.stars")
-                                    }
-                                    Text("Polish")
-                                }
-                                .font(.subheadline)
-                                .padding(.horizontal, Constants.Spacing.sm)
-                                .padding(.vertical, Constants.Spacing.xs)
-                                .background(Color.purple.opacity(0.15))
-                                .foregroundStyle(.purple)
-                                .clipShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isEnhancing)
-
+                    Button {
+                        HapticManager.impact(.light)
+                        // Flush unblurred edits first so the assistant is handed
+                        // the title the user can actually see.
+                        commitTitle()
+                        commitNotes()
+                        coordinator.startChat(about: reminder)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: Constants.Spacing.xs) {
+                            Image(systemName: "sparkles")
+                            Text("Chat about this")
                             Spacer()
-
-                            Text("Fix typos & clarify")
+                            Image(systemName: "chevron.right")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
-
-                        // Show link info if extracted
-                        if let linkInfo = reminder.aiEnhancedDescription, !linkInfo.isEmpty {
-                            HStack(alignment: .top, spacing: Constants.Spacing.sm) {
-                                Image(systemName: "link.circle.fill")
-                                    .foregroundStyle(.blue)
-                                Text(linkInfo)
-                                    .font(.subheadline)
-                            }
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.blue.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
-                        }
+                        .font(.subheadline)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.purple.opacity(0.12))
+                        .foregroundStyle(.purple)
+                        .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens the assistant with this reminder's details ready to ask about")
                 }
 
                 // Category (required)
@@ -420,11 +403,6 @@ struct ReminderDetailView: View {
         } message: {
             Text("Are you sure you want to delete this reminder? This action cannot be undone.")
         }
-        .alert("Polish Failed", isPresented: $showingAIError) {
-            Button("OK") {}
-        } message: {
-            Text(aiErrorMessage)
-        }
     }
 
     /// Writes the title draft back to the model only when the USER edited it
@@ -446,50 +424,6 @@ struct ReminderDetailView: View {
             reminder.notes = notesDraft
         }
         notesBaseline = notesDraft
-    }
-
-    private func polishWithAI() {
-        // Polish reads the model, so flush any in-flight (unblurred) edits first.
-        commitTitle()
-        commitNotes()
-        guard !reminder.title.isEmpty else { return }
-
-        isEnhancing = true
-        Task {
-            do {
-                let polished = try await ClaudeService.shared.polishReminder(
-                    title: reminder.title,
-                    notes: reminder.notes
-                )
-
-                await MainActor.run {
-                    withAnimation {
-                        // Update title if it changed (typos fixed) — keep the
-                        // local draft (and its clean baseline) in sync so a later
-                        // blur/disappear commit can't overwrite the polished
-                        // title with stale text.
-                        if polished.title != reminder.title {
-                            reminder.title = polished.title
-                            titleDraft = polished.title
-                            titleBaseline = polished.title
-                        }
-                        // Store link info if present
-                        if let linkInfo = polished.linkInfo {
-                            reminder.aiEnhancedDescription = linkInfo
-                        }
-                    }
-                    HapticManager.notification(.success)
-                    isEnhancing = false
-                }
-            } catch {
-                await MainActor.run {
-                    isEnhancing = false
-                    aiErrorMessage = error.localizedDescription
-                    showingAIError = true
-                    HapticManager.notification(.error)
-                }
-            }
-        }
     }
 
     private func completeReminder() {
@@ -519,4 +453,5 @@ struct ReminderDetailView: View {
         ReminderDetailView(reminder: reminder)
     }
     .modelContainer(container)
+    .environment(ChatCoordinator(modelContainer: container))
 }

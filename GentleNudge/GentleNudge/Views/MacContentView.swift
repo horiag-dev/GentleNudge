@@ -1093,10 +1093,10 @@ struct MacReminderDetailPanel: View {
     let onClose: () -> Void
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(ChatCoordinator.self) private var coordinator
     @Query(sort: \Category.sortOrder) private var categories: [Category]
 
     @State private var showDeleteConfirmation = false
-    @State private var isEnhancing = false
 
     /// Local edit buffers: the title/notes fields bind here instead of straight
     /// to the `@Model`, so a keystroke doesn't invalidate every `@Query` in the
@@ -1165,6 +1165,24 @@ struct MacReminderDetailPanel: View {
                         .foregroundStyle(reminder.isCompleted ? .green : .primary)
                     }
                     .buttonStyle(.plain)
+
+                    if Constants.isAPIKeyConfigured {
+                        Button {
+                            commitDrafts()
+                            coordinator.startChat(about: reminder)
+                        } label: {
+                            Label("Chat about this", systemImage: "sparkles")
+                                .font(.subheadline)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.purple.opacity(0.12))
+                                .foregroundStyle(.purple)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Puts this reminder's details in the assistant, ready to ask about")
+                    }
 
                     Divider()
 

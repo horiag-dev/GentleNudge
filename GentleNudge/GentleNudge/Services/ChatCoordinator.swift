@@ -140,6 +140,16 @@ final class ChatCoordinator {
     @ObservationIgnored
     var onAssistantReply: (@MainActor (String) -> Void)?
 
+    /// Text to drop into the composer, set by "Chat about this" on a reminder.
+    /// Deliberately a *draft*, not a sent message: the user opened the assistant
+    /// to ask something specific, so the context line is prepared for them and
+    /// nothing is sent (or paid for) until they say what they want.
+    ///
+    /// Observed by `ChatView`, which moves it into its own composer state and
+    /// clears it, and by the iOS root, which uses a non-nil value as the signal
+    /// to switch to the Assistant tab.
+    var pendingDraft: String?
+
     // Wire history: the API `messages` array (full content blocks, tool_use /
     // tool_result pairs intact). Separate from `transcript`.
     private var wireMessages: [MessageParam] = []
@@ -161,6 +171,30 @@ final class ChatCoordinator {
     }
 
     // MARK: Public API
+
+    /// Prepares a composer draft about one reminder and hands it to the UI.
+    /// Naming the reminder (and its category / due date) is enough for the
+    /// assistant to find it with `find_reminders` and act on it precisely.
+    func startChat(about reminder: Reminder) {
+        var context = "About \"\(reminder.title)\""
+        var details: [String] = []
+        if let category = reminder.category?.name, !category.isEmpty {
+            details.append(category)
+        }
+        if let dueDate = reminder.dueDate {
+            details.append("due \(Self.draftDateFormatter.string(from: dueDate))")
+        }
+        if !details.isEmpty {
+            context += " (\(details.joined(separator: " · ")))"
+        }
+        pendingDraft = context + ": "
+    }
+
+    private static let draftDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
 
     /// Single input entry point (voice-ready). Cancels any in-flight turn,
     /// bumps the generation, appends the user message, and starts a new turn.
