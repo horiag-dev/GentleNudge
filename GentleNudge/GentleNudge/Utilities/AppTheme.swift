@@ -329,7 +329,7 @@ private struct ThemeSwatchButton: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Aa")
                         .font(style.titleFont)
-                        .fontWidth(style.titleWidth)
+                        .fontWidth(style.titleWidth ?? style.fontWidth)
                         .foregroundStyle(style.titleForeground)
                         .dynamicTypeSize(.large)
                         .lineLimit(1)
@@ -340,7 +340,7 @@ private struct ThemeSwatchButton: View {
                         Text("Today")
                             .font(.system(size: ThemeSwatchMetrics.headerFontSize,
                                           weight: style.headerUppercased ? .bold : .semibold))
-                            .fontWidth(style.headerWidth)
+                            .fontWidth(style.headerWidth ?? style.fontWidth)
                             .textCase(style.headerUppercased ? .uppercase : nil)
                             .tracking(style.swatchHeaderTracking)
                             .foregroundStyle(style.headerInkColor)
@@ -352,6 +352,7 @@ private struct ThemeSwatchButton: View {
                                                         padding: ThemeSwatchMetrics.cardPadding))
                 }
                 .fontDesign(style.fontDesign)
+                .fontWidth(style.fontWidth)
                 .padding(ThemeSwatchMetrics.outerPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: ThemeSwatchMetrics.height, alignment: .top)
@@ -501,6 +502,8 @@ struct ThemeStyle {
     // Typography — applied to themed content (Today, the Mac list), not the
     // app shell, so navigation titles and Settings stay consistent.
     var fontDesign: Font.Design?
+    /// Body-text width for themed content (`nil` = standard).
+    var fontWidth: Font.Width?
     var titleFont: Font = .largeTitle.weight(.bold)
     var titleWidth: Font.Width?
     /// Two-stop gradient for the big title (`nil` = plain `titleInk`).
@@ -616,14 +619,14 @@ extension AppTheme {
             return .system
 
         case .calm:
-            // Quiet garden: a sage page, plain white cards, soft sage rows.
-            // Only the title is rounded; body text stays in the system face.
+            // Quiet garden: a sage page, plain white cards, soft sage rows,
+            // set in a friendly rounded face throughout.
             return ThemeStyle(
-                fontDesign: nil,
-                titleFont: .system(.largeTitle, design: .rounded, weight: .bold),
+                fontDesign: .rounded,
+                titleFont: .largeTitle.weight(.black),
                 titleWidth: nil,
                 titleInk: .init(light: 0x3B6649, dark: 0xA3D1AE),
-                headerFont: .headline,
+                headerFont: .title3.weight(.bold),
                 headerWidth: nil,
                 ink: .init(light: 0x24302A, dark: 0xE6EDE4),
                 secondaryInk: .init(light: 0x56645A, dark: 0xA9B8AB),
@@ -650,7 +653,9 @@ extension AppTheme {
             // caps headers, faint tint washes; the glow is for dark mode only.
             return ThemeStyle(
                 fontDesign: nil,
-                titleFont: .largeTitle.weight(.bold),
+                fontWidth: .condensed,
+                titleFont: .largeTitle.weight(.heavy),
+                titleWidth: .compressed,
                 titleGradient: (.init(light: 0x4B45B8, dark: 0xB0A6FF),
                                 .init(light: 0x75469E, dark: 0xD8B0EE)),
                 headerFont: .subheadline.weight(.bold),
@@ -722,11 +727,14 @@ extension AppTheme {
             // sandy-coral count pills as the one warm note.
             return ThemeStyle(
                 fontDesign: nil,
-                titleFont: .largeTitle.weight(.bold),
+                // Wide title and headers; task text stays standard width so
+                // long titles don't truncate on a phone.
+                titleFont: .largeTitle.weight(.heavy),
                 titleWidth: .expanded,
                 titleGradient: (.init(light: 0x053E50, dark: 0x9FE3E8),
                                 .init(light: 0x0B5F66, dark: 0x6CC6E0)),
-                headerFont: .headline.weight(.semibold),
+                headerFont: .headline.weight(.bold),
+                headerWidth: .expanded,
                 ink: .init(light: 0x0D262C, dark: 0xE1F1F3),
                 secondaryInk: .init(light: 0x41606A, dark: 0x9DBCC2),
                 headerInk: .init(light: 0x074E5A, dark: 0x8AD8DB),
@@ -895,7 +903,7 @@ private struct ThemedSectionTitleModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(style.headerFont)
-            .fontWidth(style.headerWidth)
+            .fontWidth(style.headerWidth ?? style.fontWidth)
             .textCase(style.headerUppercased ? .uppercase : nil)
             .tracking(style.headerTracking)
             .foregroundStyle(style.headerInkColor)
@@ -914,7 +922,7 @@ private struct ThemedScreenTitleModifier: ViewModifier {
         let usesFallback = style.titleGradient == nil && style.titleInk == nil
         content
             .font(style.titleFont)
-            .fontWidth(wide ? style.titleWidth : nil)
+            .fontWidth(wide ? style.titleWidth : style.fontWidth)
             .foregroundStyle(usesFallback ? (fallback ?? style.titleForeground) : style.titleForeground)
             // Wide titles would otherwise wrap "Gentle Nudge".
             .lineLimit(wide ? 1 : nil)
@@ -993,13 +1001,14 @@ extension View {
     /// the tab bar stay in one typeface.
     func themedFontDesign(theme: AppTheme = ThemeManager.shared.effectiveTheme) -> some View {
         fontDesign(theme.style.fontDesign)
+            .fontWidth(theme.style.fontWidth)
     }
 
     /// Put on screens presented or pushed from themed content (detail sheets,
     /// category pages) so the themed typeface doesn't leak into a screen with
     /// a standard navigation title.
     func unthemedPresentation() -> some View {
-        fontDesign(nil)
+        fontDesign(nil).fontWidth(nil)
     }
 
     /// Big screen-title typography (font, width, gradient/ink). `fallback`
