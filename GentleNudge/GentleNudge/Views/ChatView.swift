@@ -226,8 +226,8 @@ struct ChatView: View {
                 summary: summary,
                 snapshot: snapshot
             )
-        case .batchCreatedCard(_, let items):
-            BatchCreatedCard(items: items)
+        case .batchCreatedCard(_, let items, let skipped):
+            BatchCreatedCard(items: items, skippedTitles: skipped)
         case .findResult(_, let query, let rows, let total):
             FindResultCard(query: query, rows: rows, totalMatches: total)
         case .updateCard(_, _, let title, let changes):

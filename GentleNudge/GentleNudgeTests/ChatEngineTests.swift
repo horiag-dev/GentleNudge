@@ -405,6 +405,32 @@ final class ChatEngineExecutorTests: XCTestCase {
         XCTAssertEqual(freshReminders(container).count, 24, "Valid items persist in one batch save.")
     }
 
+    func test_createReminder_skipsOpenDuplicate_unlessAllowed() async throws {
+        let container = try makeContainer()
+        let catID = seedCategory(container, name: "Home")
+        _ = seedReminder(container, title: "Call the dentist", due: nil, categoryID: catID)
+        let repo = ReminderRepository(modelContainer: container)
+
+        func input(_ title: String, allow: Bool = false) -> CreateReminderInput {
+            CreateReminderInput(title: title, notes: nil, dueDate: nil, categoryID: catID.uuidString,
+                                recurrence: "none", recurrenceAnchorDay: nil, allowDuplicate: allow)
+        }
+
+        let dup = await repo.createReminder(input("call the  Dentist!"), timeZone: tz)
+        XCTAssertFalse(dup.isError)
+        XCTAssertNotNil(dup.duplicateOfID)
+        XCTAssertNil(dup.reminderID)
+
+        // Within one batch, the second copy is caught via pending inserts.
+        let batch = await repo.createReminders([input("Buy milk"), input("buy milk")], timeZone: tz)
+        XCTAssertNotNil(batch[0].reminderID)
+        XCTAssertNotNil(batch[1].duplicateOfID)
+
+        let forced = await repo.createReminder(input("Call the dentist", allow: true), timeZone: tz)
+        XCTAssertNotNil(forced.reminderID)
+        XCTAssertEqual(freshReminders(container).count, 3)
+    }
+
     // MARK: find_reminders
 
     func test_findReminders_dueToIsInclusiveOfTimedReminders() async throws {
@@ -729,7 +755,7 @@ final class ChatHistoryStoreTests: XCTestCase {
         }
         XCTAssertEqual(id, "t1")
         XCTAssertEqual(name, "create_reminder")
-        guard case .batchCreatedCard(_, let items) = decoded.transcript[1] else {
+        guard case .batchCreatedCard(_, let items, _) = decoded.transcript[1] else {
             return XCTFail("batch card didn't round-trip")
         }
         XCTAssertEqual(items.first?.reminderID, reminderID)

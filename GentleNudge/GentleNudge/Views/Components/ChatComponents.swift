@@ -490,7 +490,7 @@ struct QuickAddBar: View {
         for item in transcript[start...] {
             switch item {
             case .reminderCard: added += 1
-            case .batchCreatedCard(_, let items): added += items.count
+            case .batchCreatedCard(_, let items, _): added += items.count
             case .assistant(_, let text), .notice(_, let text): reply = text
             default: break
             }
@@ -512,13 +512,16 @@ struct BatchCreatedCard: View {
     @Environment(ChatCoordinator.self) private var coordinator
 
     private let items: [BatchCreatedItem]
+    /// Titles skipped because they were already open (shown as one quiet line).
+    private let skippedTitles: [String]
     @Query private var matches: [Reminder]
     @State private var showAll = false
 
     private static let collapsedCount = 6
 
-    init(items: [BatchCreatedItem]) {
+    init(items: [BatchCreatedItem], skippedTitles: [String] = []) {
         self.items = items
+        self.skippedTitles = skippedTitles
         let ids = items.map(\.reminderID)
         _matches = Query(filter: #Predicate<Reminder> { ids.contains($0.id) })
     }
@@ -568,6 +571,14 @@ struct BatchCreatedCard: View {
                         }
                     }
                     .padding(.leading, 4)
+                }
+
+                if !skippedTitles.isEmpty {
+                    Label("Already on your list: " + skippedTitles.joined(separator: ", "),
+                          systemImage: "equal.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
                 }
 
                 if !present.isEmpty {

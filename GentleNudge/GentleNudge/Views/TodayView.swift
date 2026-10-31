@@ -165,10 +165,15 @@ struct TodayView: View {
     /// "+" on one line — replacing the nav-bar large title + `.topBarTrailing`
     /// toolbar item, which put the "+" on a row above the title.
     private var titleRow: some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline, spacing: Constants.Spacing.xs) {
             Text("Gentle Nudge")
                 .font(.largeTitle)
                 .fontWeight(.bold)
+            // Small enough to ignore, there when you need to tell builds apart.
+            Text("v\(SettingsView.appVersionText)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .accessibilityLabel("Version \(SettingsView.appVersionText)")
             Spacer()
             #if os(iOS)
             Button {

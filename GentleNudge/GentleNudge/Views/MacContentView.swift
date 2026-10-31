@@ -328,6 +328,9 @@ struct MacContentView: View {
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
+                        Text("Version \(SettingsView.appVersionText)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                 }
                 .listStyle(.sidebar)

@@ -9,6 +9,8 @@ struct CreateReminderInput: Sendable {
     let categoryID: String
     let recurrence: String
     let recurrenceAnchorDay: Int?
+    /// Create even if an open reminder with the same title already exists.
+    var allowDuplicate = false
 }
 
 struct CreateCategoryInput: Sendable {
@@ -168,6 +170,10 @@ enum ChatTools {
                 "recurrence_anchor_day": nullableProp(
                     "integer",
                     "Day of month (1-31) for month-based recurrences (monthly, quarterly, semiannually, yearly). Null for other cadences. The first due_date must fall on this day (clamped to the month length)."
+                ),
+                "allow_duplicate": nullableProp(
+                    "boolean",
+                    "Set true ONLY when the user explicitly wants a second copy of a task that is already open. Otherwise null — an open reminder with the same title is skipped as a duplicate."
                 )
             ]),
             "required": .array([

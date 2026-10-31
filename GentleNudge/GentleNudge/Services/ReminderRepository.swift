@@ -14,6 +14,9 @@ struct RepositoryToolResult: Sendable {
     /// The created reminder's values at creation time. Cards compare the live
     /// reminder against this to decide Undo (still pristine) vs. Delete (changed).
     let snapshot: ReminderSnapshot?
+    /// Set when the create was skipped because an open reminder with the same
+    /// title already exists (not an error — the model reports it).
+    var duplicateOfID: UUID? = nil
 
     static func failure(_ message: String) -> RepositoryToolResult {
         RepositoryToolResult(
@@ -227,6 +230,27 @@ actor ReminderRepository {
             return .failure("Couldn't look up the category: \(error.localizedDescription)")
         }
 
+        // Deterministic backstop for the model's own cross-check: an open
+        // reminder with the same normalized title is a duplicate unless the
+        // user explicitly asked for another copy. Pending inserts count, so a
+        // batch can't duplicate itself either.
+        if !input.allowDuplicate, let existing = openReminder(titled: input.title) {
+            let payload = DuplicateSkipped(
+                skipped_duplicate: true,
+                existing_id: existing.id.uuidString,
+                title: existing.title
+            )
+            return RepositoryToolResult(
+                content: Self.encodeJSON(payload) ?? "{\"skipped_duplicate\":true}",
+                isError: false,
+                reminderID: nil,
+                displayTitle: existing.title,
+                displaySummary: nil,
+                snapshot: nil,
+                duplicateOfID: existing.id
+            )
+        }
+
         // Parse the due date with a non-lenient formatter pinned to a frozen
         // Gregorian calendar + fixed timezone, requiring an exact round-trip.
         var dueDate: Date?
@@ -322,6 +346,23 @@ actor ReminderRepository {
             displaySummary: summary,
             snapshot: snapshot
         )
+    }
+
+    /// An open (not completed) reminder whose title matches after
+    /// normalization (case, punctuation, extra spaces), if any.
+    private func openReminder(titled title: String) -> Reminder? {
+        let target = Self.normalizedTitle(title)
+        guard !target.isEmpty else { return nil }
+        let descriptor = FetchDescriptor<Reminder>(predicate: #Predicate { !$0.isCompleted })
+        let open = (try? modelContext.fetch(descriptor)) ?? []
+        return open.first { Self.normalizedTitle($0.title) == target }
+    }
+
+    nonisolated static func normalizedTitle(_ title: String) -> String {
+        title.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     // MARK: create_reminders
@@ -1117,6 +1158,12 @@ private struct CreateReminderSuccess: Encodable {
     let due_date: String?
     let category: String
     let recurrence_description: String?
+}
+
+private struct DuplicateSkipped: Encodable {
+    let skipped_duplicate: Bool
+    let existing_id: String
+    let title: String
 }
 
 private struct CreateCategorySuccess: Encodable {
