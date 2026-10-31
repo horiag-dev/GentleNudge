@@ -304,32 +304,15 @@ enum ReasoningEffort: String, CaseIterable, Identifiable {
     }
 }
 
+/// App colors. Accent and backgrounds are computed from the user's current
+/// theme (`ThemeManager`), so views that read them update live when it
+/// changes. Semantic colors stay fixed across themes.
 enum AppColors {
-    #if os(iOS)
-    static let background = Color(.systemBackground)
-    static let secondaryBackground = Color(.secondarySystemBackground)
-    static let tertiaryBackground = Color(.tertiarySystemBackground)
-    #else
-    // Match iOS system colors for consistency
-    static let background = Color(light: .white, dark: Color(red: 0.11, green: 0.11, blue: 0.12))
-    static let secondaryBackground = Color(light: Color(red: 0.92, green: 0.92, blue: 0.94), dark: Color(red: 0.17, green: 0.17, blue: 0.18))
-    static let tertiaryBackground = Color(light: .white, dark: Color(red: 0.23, green: 0.23, blue: 0.24))
-    #endif
-    static let accent = Color.blue
+    static var background: Color { ThemeManager.shared.palette.background }
+    static var secondaryBackground: Color { ThemeManager.shared.palette.secondaryBackground }
+    static var tertiaryBackground: Color { ThemeManager.shared.palette.tertiaryBackground }
+    static var accent: Color { ThemeManager.shared.palette.accent }
     static let destructive = Color.red
     static let success = Color.green
     static let warning = Color.orange
 }
-
-// Helper for light/dark mode colors on macOS
-#if os(macOS)
-extension Color {
-    init(light: Color, dark: Color) {
-        self.init(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                ? NSColor(dark)
-                : NSColor(light)
-        })
-    }
-}
-#endif

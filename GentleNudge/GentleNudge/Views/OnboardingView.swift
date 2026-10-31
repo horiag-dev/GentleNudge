@@ -75,7 +75,7 @@ struct OnboardingView: View {
                 HStack(spacing: 8) {
                     ForEach(0..<totalPages, id: \.self) { index in
                         Circle()
-                            .fill(index == currentPage ? Color.accentColor : Color.gray.opacity(0.3))
+                            .fill(index == currentPage ? AppColors.accent : Color.gray.opacity(0.3))
                             .frame(width: 8, height: 8)
                     }
                 }
@@ -183,7 +183,7 @@ struct OnboardingView: View {
                 VStack(spacing: Constants.Spacing.sm) {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 50))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(AppColors.accent)
 
                     Text("Choose Your Categories")
                         .font(.title)
@@ -288,7 +288,7 @@ struct OnboardingView: View {
                 VStack(spacing: Constants.Spacing.sm) {
                     Image(systemName: "checklist")
                         .font(.system(size: 50))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(AppColors.accent)
 
                     Text("Add Some Tasks")
                         .font(.title)
@@ -486,7 +486,7 @@ private struct FeatureRow: View {
         HStack(alignment: .top, spacing: Constants.Spacing.md) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundStyle(.blue)
+                .foregroundStyle(AppColors.accent)
                 .frame(width: 32)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -531,7 +531,7 @@ private struct SelectableRow: View {
                     .foregroundStyle(isSelected ? .white : .secondary)
             }
             .padding()
-            .background(isSelected ? Color.accentColor : AppColors.secondaryBackground)
+            .background(isSelected ? AppColors.accent : AppColors.secondaryBackground)
             .foregroundStyle(isSelected ? .white : .primary)
             .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.md))
         }
@@ -579,7 +579,7 @@ private struct TipRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Constants.Spacing.sm) {
             Image(systemName: icon)
-                .foregroundStyle(.blue)
+                .foregroundStyle(AppColors.accent)
                 .frame(width: 24)
             Text(text)
                 .font(.subheadline)

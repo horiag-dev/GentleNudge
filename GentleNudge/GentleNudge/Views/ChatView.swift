@@ -286,7 +286,7 @@ struct ChatView: View {
                             .fontWeight(.semibold)
                     }
                     .font(.caption)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(AppColors.accent)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -338,7 +338,7 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 30))
-                    .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(canSend ? AppColors.accent : Color.secondary)
             }
             .buttonStyle(.plain)
             // Fixed footprint pinned to the bottom of the growing field — never

@@ -574,7 +574,7 @@ struct VoiceModeView: View {
     private var tint: Color {
         switch phase {
         case .idle: return .secondary
-        case .listening: return .accentColor
+        case .listening: return AppColors.accent
         case .thinking: return .orange
         case .speaking: return .green
         case .error: return .orange

@@ -173,7 +173,7 @@ struct LinkedText: View {
     var body: some View {
         Text(attributedString)
             .font(font)
-            .tint(.blue)
+            .tint(AppColors.accent)
     }
 
     private var attributedString: AttributedString {
@@ -193,7 +193,11 @@ struct LinkedText: View {
                   let attributedRange = Range(range, in: attributedString) else { continue }
 
             attributedString[attributedRange].link = url
-            attributedString[attributedRange].foregroundColor = .blue
+            #if os(iOS)
+            attributedString[attributedRange].foregroundColor = UIColor(AppColors.accent)
+            #else
+            attributedString[attributedRange].foregroundColor = NSColor(AppColors.accent)
+            #endif
             attributedString[attributedRange].underlineStyle = .single
         }
 

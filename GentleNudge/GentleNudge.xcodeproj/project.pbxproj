@@ -74,6 +74,7 @@
 				Services/SpeechSynthesizer.swift,
 				Services/URLMetadataService.swift,
 				Services/VoiceAudioSession.swift,
+				Utilities/AppTheme.swift,
 				Utilities/Constants.swift,
 				Utilities/Extensions.swift,
 				Utilities/KeychainHelper.swift,
