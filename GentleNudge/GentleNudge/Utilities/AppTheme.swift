@@ -38,10 +38,10 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .system: return "The classic look"
-        case .calm: return "Sage and sand"
+        case .calm: return "Sage and white"
         case .dusk: return "Soft indigo and lavender"
         case .paper: return "Warm paper, ink accents"
-        case .ocean: return "Teal and mist"
+        case .ocean: return "Deep teal and coral"
         case .highContrast: return "Maximum legibility"
         }
     }
@@ -55,9 +55,9 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .calm:
             return ThemeHexPalette(
                 accent: .init(light: 0x4A7C59, dark: 0x5E9670),
-                background: .init(light: 0xF7F3EA, dark: 0x151815),
-                secondaryBackground: .init(light: 0xEDE6D6, dark: 0x212621),
-                tertiaryBackground: .init(light: 0xFCFAF5, dark: 0x2B312B)
+                background: .init(light: 0xEEF3EB, dark: 0x131714),
+                secondaryBackground: .init(light: 0xE2EADD, dark: 0x1E241F),
+                tertiaryBackground: .init(light: 0xFAFCF8, dark: 0x283029)
             )
         case .dusk:
             return ThemeHexPalette(
@@ -76,8 +76,8 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .ocean:
             return ThemeHexPalette(
                 accent: .init(light: 0x0E7477, dark: 0x2A8F92),
-                background: .init(light: 0xF1F6F7, dark: 0x0D181A),
-                secondaryBackground: .init(light: 0xE1EBED, dark: 0x162426),
+                background: .init(light: 0xE6F3F5, dark: 0x0A181C),
+                secondaryBackground: .init(light: 0xD5E9EC, dark: 0x142429),
                 tertiaryBackground: .init(light: 0xF8FBFB, dark: 0x1F3134)
             )
         case .highContrast:
@@ -616,70 +616,71 @@ extension AppTheme {
             return .system
 
         case .calm:
-            // Soft and rounded: pillowy cream cards, big radii, gentle shadow.
+            // Quiet garden: a sage page, plain white cards, soft sage rows.
+            // Only the title is rounded; body text stays in the system face.
             return ThemeStyle(
-                fontDesign: .rounded,
-                titleFont: .largeTitle.weight(.bold),
-                titleInk: .init(light: 0x3E6B4C, dark: 0x9CCBA8),
-                headerFont: .headline.weight(.semibold),
-                ink: .init(light: 0x2F3A31, dark: 0xE6EDE4),
-                secondaryInk: .init(light: 0x5A675C, dark: 0xA9B8AB),
-                headerInk: .init(light: 0x3E6B4C, dark: 0x9CCBA8),
-                circle: .init(light: 0x808A7C, dark: 0x8D978A),
+                fontDesign: nil,
+                titleFont: .system(.largeTitle, design: .rounded, weight: .bold),
+                titleWidth: nil,
+                titleInk: .init(light: 0x3B6649, dark: 0xA3D1AE),
+                headerFont: .headline,
+                headerWidth: nil,
+                ink: .init(light: 0x24302A, dark: 0xE6EDE4),
+                secondaryInk: .init(light: 0x56645A, dark: 0xA9B8AB),
+                headerInk: .init(light: 0x2F5A3D, dark: 0xB4D9BC),
+                circle: .init(light: 0x7D8C7F, dark: 0x8D9A8F),
                 inProgress: .init(light: 0x3E7A50, dark: 0x8CC69B),
                 dueToday: ThemeSemanticPalette.dueToday,
                 overdue: ThemeSemanticPalette.overdue,
                 done: ThemeSemanticPalette.done,
-                pageGradient: (top: .init(light: 0xF7F2E6, dark: 0x171A16),
-                               bottom: .init(light: 0xE7EEDF, dark: 0x111710)),
+                pageGradient: nil,
                 card: ThemeCardStyle(
-                    fill: .init(light: 0xFFFDF7, dark: 0x222823),
-                    tintWash: ThemeOpacity(light: 0.07, dark: 0.03),
-                    cornerRadius: 26,
-                    shadow: ThemeShadow(color: .init(light: 0x3B4A3E, dark: 0x000000),
-                                        opacity: ThemeOpacity(light: 0.12, dark: 0.35), radius: 14, y: 6)
+                    fill: .init(light: 0xFFFFFF, dark: 0x1D231E),
+                    tintWash: 0,
+                    cornerRadius: 16,
+                    shadow: ThemeShadow(color: .init(light: 0x2F4A36, dark: 0x000000),
+                                        opacity: ThemeOpacity(light: 0.07, dark: 0.30), radius: 8, y: 2)
                 ),
-                row: ThemeRowStyle(fill: .init(light: 0xF3EEE2, dark: 0x2C332D), cornerRadius: 16,
+                row: ThemeRowStyle(fill: .init(light: 0xF2F6EF, dark: 0x262E28), cornerRadius: 11,
                                    border: nil, borderOpacity: 0, borderWidth: 0, cardsListRows: true)
             )
 
         case .dusk:
-            // Twilight: heavy gradient title, small-caps headers, deep cards
-            // with a tint glow at night.
+            // Twilight, kept quiet: an indigo-to-plum title, small tracked
+            // caps headers, faint tint washes; the glow is for dark mode only.
             return ThemeStyle(
                 fontDesign: nil,
-                titleFont: .largeTitle.weight(.heavy),
-                titleGradient: (.init(light: 0x4B45B8, dark: 0xA79BFF),
-                                .init(light: 0x96376F, dark: 0xF0A3D2)),
-                headerFont: .callout.weight(.heavy),
+                titleFont: .largeTitle.weight(.bold),
+                titleGradient: (.init(light: 0x4B45B8, dark: 0xB0A6FF),
+                                .init(light: 0x75469E, dark: 0xD8B0EE)),
+                headerFont: .subheadline.weight(.bold),
                 headerUppercased: true,
-                headerTracking: 1.4,
-                swatchHeaderTracking: 0.8,
-                ink: .init(light: 0x221F3A, dark: 0xECE9FF),
-                secondaryInk: .init(light: 0x58537A, dark: 0xADA7D8),
-                headerInk: .init(light: 0x4B45B8, dark: 0xBDB4FF),
+                headerTracking: 1.0,
+                swatchHeaderTracking: 0.6,
+                ink: .init(light: 0x24213A, dark: 0xECE9FF),
+                secondaryInk: .init(light: 0x5A5578, dark: 0xADA7D8),
+                headerInk: .init(light: 0x4F4A9E, dark: 0xBDB4FF),
                 circle: .init(light: 0x7D77C2, dark: 0x8E87D9),
                 inProgress: .init(light: 0x4B45B8, dark: 0xA79BFF),
                 dueToday: ThemeSemanticPalette.dueToday,
                 overdue: ThemeSemanticPalette.overdue,
                 done: ThemeSemanticPalette.done,
-                pageGradient: (top: .init(light: 0xEFEBFB, dark: 0x1D1838),
-                               bottom: .init(light: 0xE2DBF4, dark: 0x0B0A14)),
+                pageGradient: (top: .init(light: 0xF3F1FA, dark: 0x1B1734),
+                               bottom: .init(light: 0xEAE6F5, dark: 0x0C0B15)),
                 card: ThemeCardStyle(
-                    fill: .init(light: 0xFDFCFF, dark: 0x1C1930),
-                    tintWash: ThemeOpacity(light: 0.12, dark: 0.16),
+                    fill: .init(light: 0xFFFFFF, dark: 0x1C1930),
+                    tintWash: ThemeOpacity(light: 0.04, dark: 0.10),
                     tintWashIsGradient: true,
-                    cornerRadius: 20,
-                    borderOpacity: ThemeOpacity(light: 0.2, dark: 0.35),
+                    cornerRadius: 18,
+                    borderOpacity: ThemeOpacity(light: 0.10, dark: 0.25),
                     borderWidth: 1,
                     borderUsesTint: true,
                     shadow: ThemeShadow(color: .init(light: 0x1E1A3A, dark: 0x000000),
-                                        opacity: ThemeOpacity(light: 0.10, dark: 0.28),
-                                        radius: 16, y: 2, tintGlowSchemes: [.dark])
+                                        opacity: ThemeOpacity(light: 0.05, dark: 0.18),
+                                        radius: 12, y: 2, tintGlowSchemes: [.dark])
                 ),
-                row: ThemeRowStyle(fill: .init(light: 0xF5F3FD, dark: 0x272340), cornerRadius: 12,
-                                   border: .init(light: 0x5A55C9, dark: 0x9C92F0), borderOpacity: 0.18,
-                                   borderWidth: 1, cardsListRows: true)
+                row: ThemeRowStyle(fill: .init(light: 0xF6F5FC, dark: 0x252239), cornerRadius: 12,
+                                   border: nil, borderOpacity: 0, borderWidth: 0, cardsListRows: true)
             )
 
         case .paper:
@@ -715,37 +716,44 @@ extension AppTheme {
             )
 
         case .ocean:
-            // Tide pool: a wide (expanded) title over a misty gradient, cards
-            // with a tinted header band, ledger-lined aqua rows, and sandy-coral
-            // count pills as the one warm note.
+            // Tide pool: a wide deep-teal title over a strong aqua-to-mist
+            // gradient (strong enough to show between cards on a phone),
+            // white cards with a tinted header band, aqua-outlined rows, and
+            // sandy-coral count pills as the one warm note.
             return ThemeStyle(
                 fontDesign: nil,
                 titleFont: .largeTitle.weight(.bold),
                 titleWidth: .expanded,
-                titleInk: .init(light: 0x0B4F5C, dark: 0xA6E0E4),
+                titleGradient: (.init(light: 0x053E50, dark: 0x9FE3E8),
+                                .init(light: 0x0B5F66, dark: 0x6CC6E0)),
                 headerFont: .headline.weight(.semibold),
-                ink: .init(light: 0x0F2A30, dark: 0xE1F1F3),
-                secondaryInk: .init(light: 0x46646C, dark: 0x9DBCC2),
-                headerInk: .init(light: 0x0B5560, dark: 0x8AD8DB),
-                circle: .init(light: 0x5A8790, dark: 0x6FA3AB),
+                ink: .init(light: 0x0D262C, dark: 0xE1F1F3),
+                secondaryInk: .init(light: 0x41606A, dark: 0x9DBCC2),
+                headerInk: .init(light: 0x074E5A, dark: 0x8AD8DB),
+                circle: .init(light: 0x4F818B, dark: 0x6FA3AB),
                 inProgress: .init(light: 0x2C66A8, dark: 0x79AEEC),
                 countInk: .init(light: 0x9A4524, dark: 0xF4A98A),
+                countPillOpacity: 0.18,
                 dueToday: ThemeSemanticPalette.dueToday,
                 overdue: ThemeSemanticPalette.overdue,
                 done: ThemeSemanticPalette.done,
-                pageGradient: (top: .init(light: 0xD8ECF0, dark: 0x0C2629),
-                               bottom: .init(light: 0xF3F8F9, dark: 0x091416)),
+                pageGradient: (top: .init(light: 0xA9DCE5, dark: 0x0B3540),
+                               bottom: .init(light: 0xEAF5F7, dark: 0x07131A)),
                 card: ThemeCardStyle(
-                    fill: .init(light: 0xFAFDFD, dark: 0x13262A),
+                    fill: .init(light: 0xFFFFFF, dark: 0x11252B),
                     tintWash: 0,
                     headerBandHeight: 64,
+                    headerBandOpacity: 0.30,
                     cornerRadius: 18,
-                    shadow: ThemeShadow(color: .init(light: 0x0E7477, dark: 0x000000),
-                                        opacity: ThemeOpacity(light: 0.14, dark: 0.35), radius: 10, y: 4)
+                    border: .init(light: 0x0E7477, dark: 0x5FB8BC),
+                    borderOpacity: ThemeOpacity(light: 0.14, dark: 0.22),
+                    borderWidth: 1,
+                    shadow: ThemeShadow(color: .init(light: 0x0B4F5C, dark: 0x000000),
+                                        opacity: ThemeOpacity(light: 0.16, dark: 0.40), radius: 12, y: 5)
                 ),
-                row: ThemeRowStyle(fill: .init(light: 0xE3EEF0, dark: 0x1B3236), cornerRadius: 8,
-                                   border: .init(light: 0x46646C, dark: 0x9DBCC2), borderOpacity: 0.15,
-                                   borderWidth: 1, bottomRuleOnly: true, cardsListRows: true)
+                row: ThemeRowStyle(fill: .init(light: 0xF2F9FA, dark: 0x183238), cornerRadius: 12,
+                                   border: .init(light: 0x0E7477, dark: 0x6FC2C6), borderOpacity: 0.22,
+                                   borderWidth: 1, cardsListRows: true)
             )
 
         case .highContrast:

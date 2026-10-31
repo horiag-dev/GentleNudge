@@ -128,7 +128,7 @@ final class AppThemeTests: XCTestCase {
             return "\(String(describing: s.fontDesign))|\(String(describing: s.titleWidth))|\(s.card.cornerRadius)|\(s.card.borderWidth)|\(s.headerUppercased)"
         })
         XCTAssertEqual(signatures.count, custom.count)
-        XCTAssertEqual(AppTheme.calm.style.fontDesign, .rounded)
+        XCTAssertNil(AppTheme.calm.style.fontDesign, "Calm rounds only its title")
         XCTAssertEqual(AppTheme.paper.style.fontDesign, .serif)
         XCTAssertNil(AppTheme.paper.style.card.shadow, "Paper is flat")
         XCTAssertNil(AppTheme.highContrast.style.card.shadow)
