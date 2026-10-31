@@ -68,6 +68,7 @@ struct CalendarSuggestionCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(suggestion.suggestedTitle)
                         .font(.subheadline.weight(.medium))
+                        .foregroundStyle(ThemeManager.shared.effectiveTheme.style.textStyle(muted: false))
                         .fixedSize(horizontal: false, vertical: true)
 
                     if !suggestion.rationale.isEmpty {
@@ -174,6 +175,7 @@ struct CalendarAutoAddedRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(suggestion.suggestedTitle)
                     .font(.subheadline)
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style.textStyle(muted: false))
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Added automatically from \(suggestion.eventTitle)")
                     .font(.caption2)

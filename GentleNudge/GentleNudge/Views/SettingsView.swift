@@ -767,6 +767,13 @@ struct SettingsView: View {
             #if os(macOS)
             .listStyle(.inset(alternatesRowBackgrounds: false))
             #endif
+            // Custom themes show their page background behind the grouped
+            // rows; System keeps the stock grouped background.
+            .scrollContentBackground(ThemeManager.shared.effectiveTheme == .system ? .automatic : .hidden)
+            .background {
+                ThemedPageBackground()
+                    .opacity(ThemeManager.shared.effectiveTheme == .system ? 0 : 1)
+            }
             .navigationTitle("Settings")
             .fileImporter(
                 isPresented: $showingRestoreImporter,

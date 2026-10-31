@@ -4,6 +4,9 @@ import SwiftData
 struct ReminderRow: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var reminder: Reminder
+    /// Today's category sections card each row on custom themes (ledger rules,
+    /// outlines…); elsewhere — and on System — the row stays bare.
+    var carded = false
 
     @State private var isPressed = false
     /// Accessibility-only "Open" path: the visual open is the NavigationLink
@@ -39,6 +42,7 @@ struct ReminderRow: View {
     var body: some View {
         NavigationLink {
             ReminderDetailView(reminder: reminder)
+                .unthemedPresentation()
         } label: {
             HStack(alignment: .top, spacing: Constants.Spacing.xs) {
                 // Completion Button
@@ -72,7 +76,7 @@ struct ReminderRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(reminder.title)
                         .font(.subheadline)
-                        .foregroundStyle(reminder.isCompleted || isMuted ? .secondary : .primary)
+                        .foregroundStyle(ThemeManager.shared.effectiveTheme.style.textStyle(muted: reminder.isCompleted || isMuted))
                         .strikethrough(reminder.isCompleted)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -81,11 +85,11 @@ struct ReminderRow: View {
                         if reminder.isDueToday {
                             Text("Today")
                                 .font(.caption2)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(ThemeManager.shared.effectiveTheme.style.semantic(.dueToday))
                         } else if reminder.isOverdue {
                             Text("Overdue")
                                 .font(.caption2)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(ThemeManager.shared.effectiveTheme.style.semantic(.overdue))
                         } else if let dueDate = reminder.dueDate {
                             Text(dueDate.formatted(date: .abbreviated, time: .omitted))
                                 .font(.caption2)
@@ -114,6 +118,7 @@ struct ReminderRow: View {
             .opacity(isMuted ? 0.6 : 1.0)
         }
         .buttonStyle(.plain)
+        .themedListRow(enabled: carded)
         // This row's long-press affordance is its (pre-existing) context menu,
         // so the in-progress toggle lives there — a raw `.onLongPressGesture`
         // would race the menu's own long-press recognizer on iOS.
@@ -204,6 +209,7 @@ struct ReminderRow: View {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
             }
+            .unthemedPresentation()
             .presentationDetents([.medium, .large])
         }
     }

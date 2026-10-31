@@ -238,8 +238,26 @@ private extension ContentView {
         }
         .padding(.top, Constants.Spacing.xs)
         .padding(.horizontal, Constants.Spacing.xs)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        .background(barBackground)
+        .overlay(alignment: .top) { barHairline }
+    }
+
+    /// System: the bar material + Divider, as always. Custom themes: the
+    /// theme's page background with a hairline in the theme's ink.
+    private var barBackground: AnyShapeStyle {
+        let theme = ThemeManager.shared.effectiveTheme
+        return theme == .system ? AnyShapeStyle(.bar) : AnyShapeStyle(theme.palette.background)
+    }
+
+    private var barHairline: some View {
+        let theme = ThemeManager.shared.effectiveTheme
+        let style = theme.style
+        return ZStack(alignment: .top) {
+            Divider().opacity(theme == .system ? 1 : 0)
+            Rectangle()
+                .fill(style.inkColor.opacity(theme == .system ? 0 : style.barHairlineOpacity))
+                .frame(height: 0.5)
+        }
     }
 
     func tabButton(_ tag: Int, _ title: String, _ icon: String) -> some View {

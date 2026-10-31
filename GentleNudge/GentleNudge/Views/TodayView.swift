@@ -279,13 +279,17 @@ struct TodayView: View {
                                     VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
                                         // Category header
                                         if let category = group.category {
+                                            // Custom themes: label in header ink,
+                                            // only the icon keeps the category color.
                                             HStack(spacing: Constants.Spacing.xxs) {
                                                 Image(systemName: category.icon)
                                                     .font(.caption2.weight(.semibold))
+                                                    .foregroundStyle(category.color)
                                                 Text(category.name)
                                                     .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style
+                                                        .subgroupLabelColor(category: category.color))
                                             }
-                                            .foregroundStyle(category.color)
                                         } else {
                                             Text("Uncategorized")
                                                 .font(.caption.weight(.semibold))
@@ -358,7 +362,6 @@ struct TodayView: View {
                     }
                     }
                     .padding()
-                    .themedInk()
                 }
                 #if os(iOS)
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -372,6 +375,7 @@ struct TodayView: View {
                 }
                 #endif
             }
+            .themedFontDesign()
             .background { ThemedPageBackground() }
             .navigationTitle("Gentle Nudge")
             #if os(iOS)
@@ -468,7 +472,7 @@ struct MorningBriefingCard: View {
                     }
                     Text(briefing.inAppBriefing)
                         .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(ThemeManager.shared.effectiveTheme.style.textStyle(muted: false))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -505,7 +509,7 @@ struct TodaySectionHeader: View {
                 Text(count)
                     .font(.subheadline.weight(.medium))
                     .monospacedDigit()
-                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style.secondaryInkColor)
+                    .themedCount()
             }
         }
         .themedHeaderRule()
@@ -645,7 +649,7 @@ struct HabitRow: View {
 
             Text(habit.title)
                 .font(.body)
-                .foregroundStyle(isCompletedToday ? .secondary : .primary)
+                .foregroundStyle(ThemeManager.shared.effectiveTheme.style.textStyle(muted: isCompletedToday))
                 .strikethrough(isCompletedToday)
 
             Spacer()
@@ -683,6 +687,7 @@ struct HabitRow: View {
         ])
         .sheet(isPresented: $showingHeatmap) {
             HabitDetailSheet(habit: habit)
+                .unthemedPresentation()
         }
         #endif
         // VoiceOver: one element per row (title + status + history), with the
@@ -832,6 +837,7 @@ struct UpcomingReminderRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(reminder.title)
                     .font(.subheadline.weight(.medium))
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style.textStyle(muted: false))
                     .lineLimit(1)
 
                 HStack(spacing: Constants.Spacing.xs) {
@@ -892,6 +898,7 @@ struct UpcomingReminderRow: View {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
             }
+            .unthemedPresentation()
             .presentationDetents([.medium, .large])
         }
         // VoiceOver: one element per row, with the toggle, the (otherwise
@@ -994,7 +1001,7 @@ struct NeedsAttentionRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(reminder.title)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(reminder.isCompleted ? .secondary : .primary)
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style.textStyle(muted: reminder.isCompleted))
                     .strikethrough(reminder.isCompleted)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -1053,6 +1060,7 @@ struct NeedsAttentionRow: View {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
             }
+            .unthemedPresentation()
             .presentationDetents([.medium, .large])
         }
         // VoiceOver: one element per row, with the toggle, the (otherwise
@@ -1116,10 +1124,10 @@ struct NeedsAttentionRow: View {
     private func dueColor(_ date: Date) -> Color {
         let calendar = Calendar.current
         if calendar.startOfDay(for: date) < calendar.startOfDay(for: Date()) {
-            return AppColors.destructive
+            return ThemeManager.shared.effectiveTheme.style.semantic(.overdue)
         }
         if calendar.isDateInToday(date) {
-            return AppColors.warning
+            return ThemeManager.shared.effectiveTheme.style.semantic(.dueToday)
         }
         return .secondary
     }
@@ -1141,7 +1149,7 @@ struct UncategorizedSection: View {
 
             VStack(spacing: Constants.Spacing.xxs) {
                 ForEach(reminders) { reminder in
-                    ReminderRow(reminder: reminder)
+                    ReminderRow(reminder: reminder, carded: true)
                 }
             }
         }
@@ -1178,6 +1186,7 @@ struct HomeCategorySection: View {
             // Header
             NavigationLink {
                 CategoryDetailView(category: category)
+                    .unthemedPresentation()
             } label: {
                 HStack(spacing: Constants.Spacing.xs) {
                     Image(systemName: category.icon)
@@ -1189,7 +1198,7 @@ struct HomeCategorySection: View {
                     Text("\(reminders.count)")
                         .font(.subheadline.weight(.medium))
                         .monospacedDigit()
-                        .foregroundStyle(ThemeManager.shared.effectiveTheme.style.secondaryInkColor)
+                        .themedCount()
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
@@ -1202,7 +1211,7 @@ struct HomeCategorySection: View {
             if !activeReminders.isEmpty {
                 VStack(spacing: Constants.Spacing.xxs) {
                     ForEach(activeReminders) { reminder in
-                        ReminderRow(reminder: reminder)
+                        ReminderRow(reminder: reminder, carded: true)
                     }
                 }
             }
@@ -1212,7 +1221,7 @@ struct HomeCategorySection: View {
                 DisclosureGroup {
                     VStack(spacing: Constants.Spacing.xxs) {
                         ForEach(upcomingRecurring) { reminder in
-                            ReminderRow(reminder: reminder)
+                            ReminderRow(reminder: reminder, carded: true)
                         }
                     }
                 } label: {

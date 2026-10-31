@@ -352,15 +352,9 @@ struct MacContentView: View {
                 VStack(spacing: 0) {
                     // Header
                     HStack {
-                        if ThemeManager.shared.effectiveTheme == .system {
-                            Text(sidebarTitle)
-                                .font(.largeTitle)
-                                .fontWeight(.bold)
-                                .foregroundStyle(sidebarColor)
-                        } else {
-                            Text(sidebarTitle)
-                                .themedScreenTitle()
-                        }
+                        // System keeps the per-list colored title.
+                        Text(sidebarTitle)
+                            .themedScreenTitle(fallback: AnyShapeStyle(sidebarColor))
                         Spacer()
                         Button { showingAddReminder = true } label: {
                             Image(systemName: "plus")
@@ -384,7 +378,7 @@ struct MacContentView: View {
                     }
                 }
                 .frame(minWidth: 400)
-                .themedInk()
+                .themedFontDesign()
                 .background { ThemedPageBackground() }
 
                 // Detail Panel (only shows when reminder selected)
@@ -777,7 +771,8 @@ struct SmartListCard: View {
                     .foregroundStyle(.secondary)
             }
             .padding(10)
-            .background(isSelected ? color.opacity(0.15) : AppColors.secondaryBackground)
+            .background(isSelected ? color.opacity(0.15)
+                        : (ThemeManager.shared.effectiveTheme.style.row.fill?.color ?? AppColors.secondaryBackground))
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
@@ -814,19 +809,18 @@ struct MacSectionCard<Content: View>: View {
 }
 
 /// System keeps the original Mac card (12pt padding/radius, flat wash);
-/// every other theme uses the shared themed section card.
+/// every other theme uses the shared themed section card. One modifier path,
+/// so switching themes doesn't reset the section's view identity.
 private struct MacSectionChrome: ViewModifier {
     let color: Color
 
     func body(content: Content) -> some View {
-        if ThemeManager.shared.effectiveTheme == .system {
-            content
-                .padding(12)
-                .background(color.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-        } else {
-            content.themedSectionCard(tint: color)
-        }
+        let isSystem = ThemeManager.shared.effectiveTheme == .system
+        content.modifier(ThemedSectionCardModifier(
+            tint: color,
+            style: isSystem ? .macSystem : ThemeManager.shared.effectiveTheme.style.card,
+            padding: isSystem ? ThemeCardStyle.macSystemPadding : Constants.Spacing.md
+        ))
     }
 }
 
@@ -940,7 +934,7 @@ struct MacReminderRow: View {
                 Text(reminder.title)
                     .lineLimit(2)
                     .strikethrough(isChecked)
-                    .foregroundStyle(isChecked || isMuted ? .secondary : .primary)
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style.textStyle(muted: isChecked || isMuted))
 
                 HStack(spacing: 8) {
                     if let category = reminder.category, !isHabit {

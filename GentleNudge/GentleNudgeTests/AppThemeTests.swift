@@ -143,7 +143,8 @@ final class AppThemeTests: XCTestCase {
             guard let palette = theme.hexPalette else { continue }
             let s = theme.style
             guard let card = s.card.fill, let row = s.row.fill else {
-                return XCTFail("\(theme): custom themes need opaque card and row fills")
+                XCTFail("\(theme): custom themes need opaque card and row fills")
+                continue
             }
             var surfaces: [(String, ThemeHexColor)] = [("card", card), ("row", row), ("background", palette.background)]
             if let g = s.pageGradient {
@@ -177,5 +178,71 @@ final class AppThemeTests: XCTestCase {
                 }
             }
         }
+    }
+
+    /// Status colors keep their meaning but must stay legible on every custom
+    /// theme's card and row fills: due-today / overdue labels are text
+    /// (≥ 4.5:1), the done checkmark is a glyph (≥ 3:1). Count pills too.
+    func test_customThemes_semanticColorsMeetContrast() {
+        for theme in AppTheme.allCases where theme != .system {
+            let s = theme.style
+            guard let card = s.card.fill, let row = s.row.fill else {
+                XCTFail("\(theme): custom themes need opaque card and row fills")
+                continue
+            }
+            for (mode, pick) in [("light", { (c: ThemeHexColor) in c.light }), ("dark", { (c: ThemeHexColor) in c.dark })] {
+                for role in ThemeSemanticRole.allCases {
+                    guard let color = s.semanticHex(role) else {
+                        XCTFail("\(theme): missing semantic \(role)")
+                        continue
+                    }
+                    let floor = role == .done ? 3.0 : 4.5
+                    for (surfaceName, surface) in [("card", card), ("row", row)] {
+                        XCTAssertGreaterThanOrEqual(ThemeContrast.ratio(pick(color), pick(surface)), floor,
+                                                    "\(theme) \(mode): \(role) on \(surfaceName)")
+                    }
+                }
+                if let count = s.countInk {
+                    XCTAssertGreaterThanOrEqual(ThemeContrast.ratio(pick(count), pick(card)), 4.5,
+                                                "\(theme) \(mode): count ink on card")
+                }
+            }
+        }
+    }
+
+    /// System keeps the stock status colors.
+    func test_systemStyle_semanticColorsAreStock() {
+        let s = AppTheme.system.style
+        XCTAssertEqual(s.semantic(.dueToday), .orange)
+        XCTAssertEqual(s.semantic(.overdue), .red)
+        XCTAssertEqual(s.semantic(.done), .green)
+        XCTAssertEqual(s.subgroupLabelColor(category: .teal), .teal)
+    }
+
+    /// In-progress must never read as a warning: keep it out of the
+    /// red–orange–yellow hues used by overdue / due-today.
+    func test_customThemes_inProgressIsNotWarmWarningHue() {
+        for theme in AppTheme.allCases where theme != .system {
+            guard let hex = theme.style.inProgress else {
+                XCTFail("\(theme): missing inProgress")
+                continue
+            }
+            for value in [hex.light, hex.dark] {
+                let hue = Self.hueDegrees(value)
+                XCTAssertTrue((70...300).contains(hue), "\(theme): in-progress hue \(hue)° collides with warnings")
+            }
+        }
+    }
+
+    private static func hueDegrees(_ hex: UInt32) -> Double {
+        let r = Double((hex >> 16) & 0xFF) / 255, g = Double((hex >> 8) & 0xFF) / 255, b = Double(hex & 0xFF) / 255
+        let maxC = max(r, g, b), minC = min(r, g, b), d = maxC - minC
+        guard d > 0 else { return 0 }
+        var h: Double
+        if maxC == r { h = ((g - b) / d).truncatingRemainder(dividingBy: 6) }
+        else if maxC == g { h = (b - r) / d + 2 }
+        else { h = (r - g) / d + 4 }
+        h *= 60
+        return h < 0 ? h + 360 : h
     }
 }
