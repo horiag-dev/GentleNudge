@@ -23,3 +23,4 @@ Pods/
 # Temporary files
 *.swp
 *~
+.claude/worktrees/

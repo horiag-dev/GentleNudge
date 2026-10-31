@@ -14,6 +14,9 @@ struct TodayView: View {
     /// Manual entry is the rare path (the AI assistant and Voice do the heavy
     /// lifting), so it lives here as a quiet "+" in the header — not in the bar.
     @State private var showingAddReminder = false
+    /// Gates the quick-add bar. Cached (a Keychain read) and refreshed on
+    /// appear / foreground so a key entered in Settings shows the bar.
+    @State private var hasAssistantKey = Constants.isAPIKeyConfigured
     @AppStorage(Constants.DefaultsKeys.habitVisibility)
     private var habitVisibilityRaw = HabitVisibility.all.rawValue
 
@@ -218,6 +221,13 @@ struct TodayView: View {
             VStack(spacing: 0) {
                 titleRow
                 searchField
+                #if os(iOS)
+                if hasAssistantKey {
+                    QuickAddBar()
+                        .padding(.horizontal)
+                        .padding(.bottom, Constants.Spacing.sm)
+                }
+                #endif
 
                 ScrollView {
                     LazyVStack(spacing: Constants.Spacing.md) {
@@ -365,8 +375,12 @@ struct TodayView: View {
         .task {
             await calendarCoordinator.scanIfNeeded()
         }
+        .onAppear {
+            hasAssistantKey = Constants.isAPIKeyConfigured
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                hasAssistantKey = Constants.isAPIKeyConfigured
                 Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
                 Task { await calendarCoordinator.scanIfNeeded() }
             }

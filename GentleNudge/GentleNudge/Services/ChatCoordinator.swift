@@ -7,7 +7,7 @@ import SwiftData
 /// An append-only, immutable display item. This list is deliberately separate
 /// from the API `messages` wire history (which gets trimmed/replayed). A future
 /// `ChatView` (increment 2b) renders these.
-enum TranscriptItem: Identifiable, Sendable {
+enum TranscriptItem: Identifiable, Sendable, Codable {
     case user(id: UUID, text: String)
     case assistant(id: UUID, text: String)
     case reminderCard(id: UUID, reminderID: UUID, title: String, summary: String, snapshot: ReminderSnapshot)
@@ -56,7 +56,7 @@ enum TranscriptItem: Identifiable, Sendable {
 }
 
 /// Which memory action a `memoryCard` reflects, driving its header and styling.
-enum MemoryCardAction: String, Sendable, Equatable {
+enum MemoryCardAction: String, Sendable, Equatable, Codable {
     case remembered
     case updated
     case forgotten
@@ -114,24 +114,22 @@ final class ChatCoordinator {
     /// `.notice` transcript items instead.
     private(set) var lastError: ChatError?
 
-    /// Confirmation gate for `create_category`. Defaults to deny until 2b wires
-    /// an Approve/Cancel card. Returns true to approve creation.
+    /// Confirmation gate for `create_category`, wired to `confirmationPresenter`
+    /// in init. Returns true to approve creation.
     var categoryApprovalHook: @Sendable (_ name: String) async -> Bool = { _ in false }
 
-    /// Confirmation gate for the destructive `delete_reminder`. Defaults to deny
-    /// until `ChatView` wires the shared Approve/Cancel card. Returns true to
-    /// approve deletion. Reuses the same presenter seam as the category gate.
+    /// Confirmation gate for the destructive `delete_reminder`. Wired to
+    /// `confirmationPresenter` in init. Returns true to approve deletion. Reuses the same presenter seam as the category gate.
     var deletionApprovalHook: @Sendable (_ title: String) async -> Bool = { _ in false }
 
     /// Confirmation gate for the destructive batch `delete_reminders`. Shown ONCE
     /// for the whole batch, carrying the count and a sample of titles so the user
-    /// sees what's being cleared. Defaults to deny until `ChatView` wires the
-    /// shared presenter.
+    /// sees what's being cleared. Wired to `confirmationPresenter` in init.
     var bulkDeletionApprovalHook: @Sendable (_ count: Int, _ sampleTitles: [String]) async -> Bool = { _, _ in false }
 
     /// Confirmation gate for a *large* batch `complete_reminders`. Completing is
     /// non-destructive, so only batches at/above `bulkCompletionConfirmThreshold`
-    /// are gated (smaller ones run straight through). Defaults to deny until wired.
+    /// are gated (smaller ones run straight through). Wired in init.
     var bulkCompletionApprovalHook: @Sendable (_ count: Int, _ sampleTitles: [String]) async -> Bool = { _, _ in false }
 
     /// A batch completion at or above this size shows a brief confirmation first.
@@ -161,6 +159,14 @@ final class ChatCoordinator {
     private let container: ModelContainer
     private let client: AnthropicClient
     private let repository: ReminderRepository
+    /// The Approve/Cancel gate the approval hooks suspend on. Owned here (not
+    /// by `ChatView`) so a turn started from outside the chat — Today's quick
+    /// add, Siri — can still ask; `ContentView` brings the Assistant forward
+    /// whenever `pending` is set so the card is on screen.
+    let confirmationPresenter = ConfirmationPresenter()
+
+    /// Persists the conversation across launches. Nil for previews/tests.
+    private let historyStore: ChatHistoryStore?
 
     private var currentGeneration = 0
     private var runTask: Task<Void, Never>?
@@ -170,13 +176,82 @@ final class ChatCoordinator {
     private let maxIterations = 12
     private let maxTokens = 16000
 
-    init(modelContainer: ModelContainer, client: AnthropicClient = AnthropicClient()) {
+    init(
+        modelContainer: ModelContainer,
+        client: AnthropicClient = AnthropicClient(),
+        historyStore: ChatHistoryStore? = nil
+    ) {
         self.container = modelContainer
         self.client = client
         self.repository = ReminderRepository(modelContainer: modelContainer)
+        self.historyStore = historyStore
+        wireConfirmationHooks()
+        if let saved = historyStore?.load() {
+            wireMessages = saved.wireMessages
+            transcript = saved.transcript
+            // A turn interrupted by a quit can leave a dangling tool_use.
+            sanitizeWireTail()
+        }
+    }
+
+    /// Replaces the default-deny stubs with the shared in-chat gates. Voice mode
+    /// temporarily swaps these for auto-decline and restores them after.
+    private func wireConfirmationHooks() {
+        let presenter = confirmationPresenter
+        categoryApprovalHook = { name in
+            await presenter.request(
+                title: "Create a new category?",
+                message: "The assistant wants to create the category “\(name)”. Approve to add it, or cancel to pick an existing one.",
+                confirmLabel: "Approve",
+                isDestructive: false
+            )
+        }
+        deletionApprovalHook = { title in
+            await presenter.request(
+                title: "Delete this reminder?",
+                message: "The assistant wants to permanently delete “\(title)”. This can't be undone.",
+                confirmLabel: "Delete",
+                isDestructive: true
+            )
+        }
+        bulkDeletionApprovalHook = { count, sampleTitles in
+            let noun = count == 1 ? "reminder" : "reminders"
+            return await presenter.request(
+                title: "Clean up \(count) \(noun)?",
+                message: "The assistant wants to permanently delete \(count) \(noun). This can't be undone.",
+                confirmLabel: "Delete \(count)",
+                isDestructive: true,
+                sampleTitles: sampleTitles
+            )
+        }
+        bulkCompletionApprovalHook = { count, sampleTitles in
+            let noun = count == 1 ? "reminder" : "reminders"
+            return await presenter.request(
+                title: "Complete \(count) \(noun)?",
+                message: "The assistant wants to mark \(count) \(noun) done.",
+                confirmLabel: "Complete \(count)",
+                isDestructive: false,
+                sampleTitles: sampleTitles
+            )
+        }
+    }
+
+    /// Saves the conversation once a turn settles. Skipped for a superseded
+    /// generation so a late, cancelled turn can't resurrect a cleared chat.
+    private func persistHistory(generation: Int) {
+        guard generation == currentGeneration else { return }
+        historyStore?.save(wireMessages: wireMessages, transcript: transcript)
     }
 
     // MARK: Public API
+
+    /// Bumped to ask the UI to bring the Assistant forward (iOS switches tabs;
+    /// the Mac chat is always docked). Used by Today's quick add "Open chat".
+    private(set) var assistantRequest = 0
+
+    func requestAssistant() {
+        assistantRequest += 1
+    }
 
     /// Prepares a composer draft about one reminder and hands it to the UI.
     /// Naming the reminder (and its category / due date) is enough for the
@@ -225,7 +300,43 @@ final class ChatCoordinator {
 
         runTask = Task { [weak self] in
             await self?.executeTurn(generation: generation)
+            self?.persistHistory(generation: generation)
         }
+    }
+
+    /// Runs one turn with no chat UI attached (Siri / Shortcuts) and returns a
+    /// one-line spoken result. Approval gates auto-decline for the turn — the
+    /// same rule as voice mode — so nothing destructive happens unseen and the
+    /// turn can't hang on a card nobody sees; the model then explains instead.
+    /// The turn still lands in the transcript, so the cards are there later.
+    func runHeadless(userText: String) async -> String {
+        let saved = (categoryApprovalHook, deletionApprovalHook, bulkDeletionApprovalHook, bulkCompletionApprovalHook)
+        categoryApprovalHook = { _ in false }
+        deletionApprovalHook = { _ in false }
+        bulkDeletionApprovalHook = { _, _ in false }
+        bulkCompletionApprovalHook = { _, _ in false }
+        defer {
+            (categoryApprovalHook, deletionApprovalHook, bulkDeletionApprovalHook, bulkCompletionApprovalHook) = saved
+        }
+
+        run(userText: userText)
+        let start = transcript.count
+        await runTask?.value
+
+        var added = 0
+        var reply: String?
+        for item in transcript[min(start, transcript.count)...] {
+            switch item {
+            case .reminderCard: added += 1
+            case .batchCreatedCard(_, let items): added += items.count
+            case .assistant(_, let text), .notice(_, let text): reply = text
+            default: break
+            }
+        }
+        if let reply { return reply }
+        if added > 0 { return "Added \(added) reminder\(added == 1 ? "" : "s")." }
+        if lastError != nil { return "I couldn't reach the assistant. Open Gentle Nudge to try again." }
+        return "Done."
     }
 
     /// Cancels any in-flight turn, bumps the generation (so late callbacks are
@@ -235,6 +346,7 @@ final class ChatCoordinator {
         currentGeneration += 1
         wireMessages.removeAll()
         transcript.removeAll()
+        historyStore?.clear()
         isRunning = false
         streamingText = nil
         activity = nil
@@ -260,6 +372,7 @@ final class ChatCoordinator {
         isRunning = true
         runTask = Task { [weak self] in
             await self?.executeTurn(generation: generation)
+            self?.persistHistory(generation: generation)
         }
     }
 
@@ -1190,7 +1303,7 @@ final class ChatCoordinator {
 // MARK: - Batch creation card item
 
 /// One reminder created by `create_reminders`, carried by `.batchCreatedCard`.
-struct BatchCreatedItem: Sendable, Identifiable {
+struct BatchCreatedItem: Sendable, Identifiable, Codable {
     let reminderID: UUID
     let title: String
     let summary: String

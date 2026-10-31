@@ -31,7 +31,7 @@ struct RepositoryToolResult: Sendable {
 /// action is **Undo** only while the live reminder still matches this snapshot and
 /// carries no post-creation history (see `matchesCreation(_:)`); once anything has
 /// changed the action becomes a confirmed **Delete**.
-struct ReminderSnapshot: Sendable, Equatable {
+struct ReminderSnapshot: Sendable, Equatable, Codable {
     let title: String
     let notes: String
     let dueDate: Date?
@@ -67,7 +67,7 @@ extension ReminderSnapshot {
 /// One row of a `find_reminders` result. Carries both the wire fields (encoded to
 /// compact JSON for the model) and card-only display strings. Sendable so it
 /// crosses the repository-actor boundary into the transcript.
-struct FindRow: Sendable, Identifiable, Equatable {
+struct FindRow: Sendable, Identifiable, Equatable, Codable {
     let id: UUID
     let title: String
     let dueDate: String?      // wire: YYYY-MM-DD (nil if undated)
@@ -89,10 +89,13 @@ struct FindRemindersResult: Sendable {
 
 /// A single field change applied by `update_reminder`, phrased for the diff card
 /// ("Due → Fri, Jul 24", "Recurrence → Monthly").
-struct ReminderFieldChange: Sendable, Identifiable, Equatable {
+struct ReminderFieldChange: Sendable, Identifiable, Equatable, Codable {
     let id = UUID()
     let label: String
     let value: String
+
+    // `id` is display-only; a restored transcript just gets fresh ones.
+    private enum CodingKeys: String, CodingKey { case label, value }
 }
 
 /// Result of `update_reminder`.

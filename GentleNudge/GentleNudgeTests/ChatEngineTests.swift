@@ -691,3 +691,74 @@ final class ChatEngineExecutorTests: XCTestCase {
         XCTAssertEqual(result.skippedCount, 1)
     }
 }
+
+// MARK: - Chat history persistence
+
+final class ChatHistoryStoreTests: XCTestCase {
+    private func tempStore() -> ChatHistoryStore {
+        ChatHistoryStore(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatHistoryTest-\(UUID().uuidString).json"))
+    }
+
+    func test_snapshot_roundTripsWireAndTranscript() throws {
+        let reminderID = UUID()
+        let snapshot = ChatHistorySnapshot(
+            savedAt: Date(),
+            wireMessages: [
+                MessageParam(role: "user", content: [.text("Add milk")]),
+                MessageParam(role: "assistant", content: [.toolUse(id: "t1", name: "create_reminder", input: .object(["title": .string("Milk")]))]),
+                MessageParam(role: "user", content: [.toolResult(toolUseID: "t1", content: "{}", isError: false)])
+            ],
+            transcript: [
+                .user(id: UUID(), text: "Add milk"),
+                .batchCreatedCard(id: UUID(), items: [BatchCreatedItem(
+                    reminderID: reminderID, title: "Milk", summary: "Groceries",
+                    snapshot: ReminderSnapshot(title: "Milk", notes: "", dueDate: nil, categoryID: nil,
+                                               recurrenceRaw: 0, recurrenceAnchorDay: nil, priorityRaw: 0)
+                )]),
+                .updateCard(id: UUID(), reminderID: reminderID, title: "Milk",
+                            changes: [ReminderFieldChange(label: "Due", value: "Fri")])
+            ]
+        )
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(ChatHistorySnapshot.self, from: data)
+        XCTAssertEqual(decoded.wireMessages.count, 3)
+        XCTAssertEqual(decoded.transcript.count, 3)
+        guard case .toolUse(let id, let name, _) = decoded.wireMessages[1].content.first else {
+            return XCTFail("tool_use block didn't round-trip")
+        }
+        XCTAssertEqual(id, "t1")
+        XCTAssertEqual(name, "create_reminder")
+        guard case .batchCreatedCard(_, let items) = decoded.transcript[1] else {
+            return XCTFail("batch card didn't round-trip")
+        }
+        XCTAssertEqual(items.first?.reminderID, reminderID)
+    }
+
+    func test_trimmedWire_startsAtAFreshUserTextMessage() {
+        var messages: [MessageParam] = []
+        for index in 0..<40 {
+            messages.append(MessageParam(role: "user", content: [.text("turn \(index)")]))
+            messages.append(MessageParam(role: "assistant", content: [.toolUse(id: "t\(index)", name: "x", input: .object([:]))]))
+            messages.append(MessageParam(role: "user", content: [.toolResult(toolUseID: "t\(index)", content: "ok", isError: false)]))
+        }
+        let trimmed = ChatHistoryStore.trimmedWire(messages)
+        XCTAssertLessThanOrEqual(trimmed.count, ChatHistoryStore.maxWireMessages)
+        XCTAssertEqual(trimmed.first?.role, "user")
+        guard case .text = trimmed.first?.content.first else {
+            return XCTFail("trimmed history must open on a user text turn, not a tool_result")
+        }
+    }
+
+    func test_store_saveThenLoad() async throws {
+        let store = tempStore()
+        store.save(wireMessages: [MessageParam(role: "user", content: [.text("hi")])],
+                   transcript: [.user(id: UUID(), text: "hi")])
+        // The write is detached; poll briefly.
+        for _ in 0..<50 where store.load() == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(store.load()?.transcript.count, 1)
+        try? FileManager.default.removeItem(at: store.fileURL)
+    }
+}

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppIntents
 import SwiftData
 
 enum StorageMode: String {
@@ -36,7 +37,10 @@ struct GentleNudgeApp: App {
 
         let container = Self.makeSharedModelContainer()
         self.sharedModelContainer = container
-        _chatCoordinator = State(initialValue: ChatCoordinator(modelContainer: container))
+        let coordinator = ChatCoordinator(modelContainer: container, historyStore: .shared)
+        _chatCoordinator = State(initialValue: coordinator)
+        // Siri / Shortcuts (`AddToGentleNudgeIntent`) talk to this same instance.
+        AppDependencyManager.shared.add(dependency: coordinator)
         _calendarCoordinator = State(initialValue: CalendarScanCoordinator(modelContainer: container))
     }
 

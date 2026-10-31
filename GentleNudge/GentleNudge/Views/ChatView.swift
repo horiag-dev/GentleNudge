@@ -22,7 +22,6 @@ struct ChatView: View {
 
     @State private var draft = ""
     @State private var hasAPIKey = Constants.isAPIKeyConfigured
-    @State private var confirmationPresenter = ConfirmationPresenter()
     /// Presents the category editor from the no-categories gate, so the gate is
     /// actionable in place (the `@Query` clears it as soon as a category exists).
     @State private var showingAddCategory = false
@@ -76,7 +75,6 @@ struct ChatView: View {
         .background(AppColors.background)
         .onAppear {
             refreshKeyState()
-            wireConfirmationHooks()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshKeyState() }
@@ -265,11 +263,11 @@ struct ChatView: View {
                 )
             }
 
-            if let pending = confirmationPresenter.pending {
+            if let pending = coordinator.confirmationPresenter.pending {
                 ConfirmationCard(
                     pending: pending,
-                    onConfirm: { confirmationPresenter.resolve(true) },
-                    onCancel: { confirmationPresenter.resolve(false) }
+                    onConfirm: { coordinator.confirmationPresenter.resolve(true) },
+                    onCancel: { coordinator.confirmationPresenter.resolve(false) }
                 )
             }
 
@@ -370,7 +368,7 @@ struct ChatView: View {
 
     private func startNewChat() {
         // Unblock any pending confirmation gate so a stale continuation can't leak.
-        confirmationPresenter.resolve(false)
+        coordinator.confirmationPresenter.resolve(false)
         coordinator.newChat()
         draft = ""
         inputFocused = true
@@ -409,49 +407,6 @@ struct ChatView: View {
 
     private func refreshKeyState() {
         hasAPIKey = Constants.isAPIKeyConfigured
-    }
-
-    /// Replace the coordinator's default-deny stubs with the in-chat gates. Both
-    /// the category-creation and reminder-deletion gates share one presenter (only
-    /// one is ever pending at a time — turns are single-in-flight).
-    private func wireConfirmationHooks() {
-        let presenter = confirmationPresenter
-        coordinator.categoryApprovalHook = { name in
-            await presenter.request(
-                title: "Create a new category?",
-                message: "The assistant wants to create the category “\(name)”. Approve to add it, or cancel to pick an existing one.",
-                confirmLabel: "Approve",
-                isDestructive: false
-            )
-        }
-        coordinator.deletionApprovalHook = { title in
-            await presenter.request(
-                title: "Delete this reminder?",
-                message: "The assistant wants to permanently delete “\(title)”. This can't be undone.",
-                confirmLabel: "Delete",
-                isDestructive: true
-            )
-        }
-        coordinator.bulkDeletionApprovalHook = { count, sampleTitles in
-            let noun = count == 1 ? "reminder" : "reminders"
-            return await presenter.request(
-                title: "Clean up \(count) \(noun)?",
-                message: "The assistant wants to permanently delete \(count) \(noun). This can't be undone.",
-                confirmLabel: "Delete \(count)",
-                isDestructive: true,
-                sampleTitles: sampleTitles
-            )
-        }
-        coordinator.bulkCompletionApprovalHook = { count, sampleTitles in
-            let noun = count == 1 ? "reminder" : "reminders"
-            return await presenter.request(
-                title: "Complete \(count) \(noun)?",
-                message: "The assistant wants to mark \(count) \(noun) done.",
-                confirmLabel: "Complete \(count)",
-                isDestructive: false,
-                sampleTitles: sampleTitles
-            )
-        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

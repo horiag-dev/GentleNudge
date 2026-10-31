@@ -355,6 +355,152 @@ struct ReminderCardView: View {
     }
 }
 
+// MARK: - Quick add (Today)
+
+/// A one-line composer on Today that hands whatever is typed or pasted — one
+/// todo or a whole list — straight to the assistant, without leaving Today.
+/// While the turn runs it shows the live activity ("Adding 25 reminders…");
+/// afterwards a one-line result with "Open chat" to see the cards. Anything
+/// needing a decision (a new category, a delete) brings the Assistant forward
+/// on its own via `ContentView`.
+struct QuickAddBar: View {
+    @Environment(ChatCoordinator.self) private var coordinator
+
+    @State private var text = ""
+    /// Transcript length when this bar started a turn; nil when it didn't.
+    @State private var startIndex: Int?
+    @State private var outcome: Outcome?
+    @FocusState private var focused: Bool
+
+    private enum Outcome: Equatable {
+        case added(count: Int, reply: String?)
+        case replied(String)
+        case failed
+    }
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var isMine: Bool { startIndex != nil && coordinator.isRunning }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Constants.Spacing.xs) {
+            HStack(alignment: .bottom, spacing: Constants.Spacing.xs) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 3)
+                TextField("Add a todo, or paste a whole list", text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .focused($focused)
+                    .submitLabel(.send)
+                    .onSubmit(send)
+                    .disabled(isMine)
+                if !trimmed.isEmpty || isMine {
+                    Button(action: send) {
+                        if isMine {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.title3)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .disabled(isMine)
+                    .accessibilityLabel("Send to assistant")
+                }
+            }
+            .padding(.horizontal, Constants.Spacing.sm)
+            .padding(.vertical, Constants.Spacing.xs)
+            .background(AppColors.secondaryBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            if isMine {
+                Text(activityText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, Constants.Spacing.sm)
+                    .transition(.opacity)
+            } else if let outcome {
+                outcomeRow(outcome)
+                    .padding(.horizontal, Constants.Spacing.sm)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isMine)
+        .animation(.easeInOut(duration: 0.2), value: outcome)
+        .onChange(of: coordinator.isRunning) { _, running in
+            guard !running, let start = startIndex else { return }
+            startIndex = nil
+            outcome = Self.summarize(coordinator.transcript, from: start, failed: coordinator.lastError != nil)
+        }
+    }
+
+    private var activityText: String {
+        switch coordinator.activity {
+        case .working(let phrase): return "\(phrase)…"
+        default: return "Thinking…"
+        }
+    }
+
+    @ViewBuilder
+    private func outcomeRow(_ outcome: Outcome) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Constants.Spacing.xs) {
+            switch outcome {
+            case .added(let count, let reply):
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Added \(count) reminder\(count == 1 ? "" : "s")" + (reply.map { " · \($0)" } ?? ""))
+                    .lineLimit(2)
+            case .replied(let reply):
+                Image(systemName: "bubble.left.fill").foregroundStyle(.secondary)
+                Text(reply).lineLimit(2)
+            case .failed:
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text("Couldn't reach the assistant.")
+            }
+            Spacer(minLength: 0)
+            Button("Open chat") { coordinator.requestAssistant() }
+                .buttonStyle(.borderless)
+            Button {
+                self.outcome = nil
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Dismiss")
+        }
+        .font(.caption)
+    }
+
+    private func send() {
+        guard !trimmed.isEmpty, !coordinator.isRunning else { return }
+        let message = trimmed
+        outcome = nil
+        // Run first: `run` appends the user message, so the turn's output
+        // starts after it.
+        coordinator.run(userText: message)
+        startIndex = coordinator.transcript.count
+        text = ""
+        focused = false
+    }
+
+    private static func summarize(_ transcript: [TranscriptItem], from start: Int, failed: Bool) -> Outcome? {
+        guard start <= transcript.count else { return nil }
+        var added = 0
+        var reply: String?
+        for item in transcript[start...] {
+            switch item {
+            case .reminderCard: added += 1
+            case .batchCreatedCard(_, let items): added += items.count
+            case .assistant(_, let text), .notice(_, let text): reply = text
+            default: break
+            }
+        }
+        if added > 0 { return .added(count: added, reply: reply) }
+        if failed { return .failed }
+        return reply.map { .replied($0) }
+    }
+}
+
 // MARK: - Batch created card (create_reminders)
 
 /// One card for a whole `create_reminders` batch: a count header, a compact

@@ -169,7 +169,7 @@ struct SystemBlock: Encodable, Sendable {
     let cache_control: CacheControl?
 }
 
-struct MessageParam: Encodable, Sendable {
+struct MessageParam: Codable, Sendable {
     let role: String
     let content: [ContentBlockParam]
 }
@@ -177,7 +177,7 @@ struct MessageParam: Encodable, Sendable {
 /// Content blocks we send on the wire. Also the shape we re-encode when replaying
 /// wire history each turn (text + tool_use echoed from the assistant, tool_result
 /// produced by executors).
-enum ContentBlockParam: Encodable, Sendable {
+enum ContentBlockParam: Codable, Sendable {
     case text(String)
     case toolUse(id: String, name: String, input: JSONValue)
     case toolResult(toolUseID: String, content: String, isError: Bool)
@@ -203,6 +203,34 @@ enum ContentBlockParam: Encodable, Sendable {
             try container.encode(toolUseID, forKey: .tool_use_id)
             try container.encode(content, forKey: .content)
             try container.encode(isError, forKey: .is_error)
+        }
+    }
+
+    /// Decodes the same shape `encode(to:)` writes, so persisted chat history
+    /// (`ChatHistoryStore`) round-trips.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "text":
+            self = .text(try container.decode(String.self, forKey: .text))
+        case "tool_use":
+            self = .toolUse(
+                id: try container.decode(String.self, forKey: .id),
+                name: try container.decode(String.self, forKey: .name),
+                input: try container.decode(JSONValue.self, forKey: .input)
+            )
+        case "tool_result":
+            self = .toolResult(
+                toolUseID: try container.decode(String.self, forKey: .tool_use_id),
+                content: try container.decode(String.self, forKey: .content),
+                isError: try container.decode(Bool.self, forKey: .is_error)
+            )
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type, in: container,
+                debugDescription: "Unknown content block type '\(type)'"
+            )
         }
     }
 }
