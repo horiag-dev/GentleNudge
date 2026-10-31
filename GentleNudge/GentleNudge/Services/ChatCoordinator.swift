@@ -245,14 +245,6 @@ final class ChatCoordinator {
 
     // MARK: Public API
 
-    /// Bumped to ask the UI to bring the Assistant forward (iOS switches tabs;
-    /// the Mac chat is always docked). Used by Today's quick add "Open chat".
-    private(set) var assistantRequest = 0
-
-    func requestAssistant() {
-        assistantRequest += 1
-    }
-
     /// Prepares a composer draft about one reminder and hands it to the UI.
     /// Naming the reminder (and its category / due date) is enough for the
     /// assistant to find it with `find_reminders` and act on it precisely.

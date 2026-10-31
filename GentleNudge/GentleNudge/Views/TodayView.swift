@@ -14,9 +14,18 @@ struct TodayView: View {
     /// Manual entry is the rare path (the AI assistant and Voice do the heavy
     /// lifting), so it lives here as a quiet "+" in the header — not in the bar.
     @State private var showingAddReminder = false
-    /// Gates the quick-add bar. Cached (a Keychain read) and refreshed on
-    /// appear / foreground so a key entered in Settings shows the bar.
-    @State private var hasAssistantKey = Constants.isAPIKeyConfigured
+    /// Search stays out of the way until the list is pulled down (like Mail /
+    /// Notes); it tucks away again on scroll once it's empty and unfocused.
+    @State private var searchRevealed = false
+    @FocusState private var searchFocused: Bool
+
+    private var showsSearch: Bool {
+        #if os(iOS)
+        searchRevealed || !searchText.isEmpty
+        #else
+        true
+        #endif
+    }
     @AppStorage(Constants.DefaultsKeys.habitVisibility)
     private var habitVisibilityRaw = HabitVisibility.all.rawValue
 
@@ -199,6 +208,7 @@ struct TodayView: View {
                 .foregroundStyle(.secondary)
             TextField("Search reminders", text: $searchText)
                 .textFieldStyle(.plain)
+                .focused($searchFocused)
                 .autocorrectionDisabled()
             if !searchText.isEmpty {
                 Button {
@@ -225,14 +235,10 @@ struct TodayView: View {
 
             VStack(spacing: 0) {
                 titleRow
-                searchField
-                #if os(iOS)
-                if hasAssistantKey {
-                    QuickAddBar()
-                        .padding(.horizontal)
-                        .padding(.bottom, Constants.Spacing.sm)
+                if showsSearch {
+                    searchField
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                #endif
 
                 ScrollView {
                     LazyVStack(spacing: Constants.Spacing.md) {
@@ -354,6 +360,17 @@ struct TodayView: View {
                     }
                     .padding()
                 }
+                #if os(iOS)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentOffset.y + geometry.contentInsets.top
+                } action: { _, offset in
+                    if offset < -60, !searchRevealed {
+                        withAnimation(Constants.Animation.standard) { searchRevealed = true }
+                    } else if offset > 40, searchRevealed, searchText.isEmpty, !searchFocused {
+                        withAnimation(Constants.Animation.standard) { searchRevealed = false }
+                    }
+                }
+                #endif
             }
             .background(AppColors.background)
             .navigationTitle("Gentle Nudge")
@@ -380,12 +397,8 @@ struct TodayView: View {
         .task {
             await calendarCoordinator.scanIfNeeded()
         }
-        .onAppear {
-            hasAssistantKey = Constants.isAPIKeyConfigured
-        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                hasAssistantKey = Constants.isAPIKeyConfigured
                 Task { await briefingVM.refreshIfNeeded(reminders: reminderSummaries) }
                 Task { await calendarCoordinator.scanIfNeeded() }
             }

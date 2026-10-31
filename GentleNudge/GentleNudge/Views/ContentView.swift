@@ -123,12 +123,9 @@ struct ContentView: View {
         .onChange(of: coordinator.pendingDraft) { _, draft in
             if draft != nil { selectedTab = 1 }
         }
-        // A turn started outside the chat (Today's quick add, Siri) that needs
+        // A turn started outside the chat (Siri / Shortcuts) that needs
         // an Approve/Cancel decision brings the Assistant forward so the gate
         // card is on screen instead of silently waiting.
-        .onChange(of: coordinator.assistantRequest) { _, _ in
-            selectedTab = 1
-        }
         .onChange(of: coordinator.confirmationPresenter.pending?.id) { _, pendingID in
             if pendingID != nil { selectedTab = 1 }
         }
