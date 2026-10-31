@@ -11,6 +11,8 @@ enum TranscriptItem: Identifiable, Sendable {
     case user(id: UUID, text: String)
     case assistant(id: UUID, text: String)
     case reminderCard(id: UUID, reminderID: UUID, title: String, summary: String, snapshot: ReminderSnapshot)
+    /// `create_reminders` result: one compact card for the whole batch.
+    case batchCreatedCard(id: UUID, items: [BatchCreatedItem])
     case notice(id: UUID, text: String)
     /// `find_reminders` result: a compact list (card shows ≤5 rows + "+N more").
     case findResult(id: UUID, query: String?, rows: [FindRow], totalMatches: Int)
@@ -34,6 +36,8 @@ enum TranscriptItem: Identifiable, Sendable {
              .notice(let id, _):
             return id
         case .reminderCard(let id, _, _, _, _):
+            return id
+        case .batchCreatedCard(let id, _):
             return id
         case .findResult(let id, _, _, _):
             return id
@@ -161,8 +165,10 @@ final class ChatCoordinator {
     private var currentGeneration = 0
     private var runTask: Task<Void, Never>?
 
-    private let maxIterations = 6
-    private let maxTokens = 4096
+    // Headroom for long lists: a 25-item brain dump is one create_reminders call
+    // of several thousand output tokens, plus a find/fix round or two.
+    private let maxIterations = 12
+    private let maxTokens = 16000
 
     init(modelContainer: ModelContainer, client: AnthropicClient = AnthropicClient()) {
         self.container = modelContainer
@@ -268,6 +274,12 @@ final class ChatCoordinator {
         await repository.deleteReminder(id: id)
     }
 
+    /// Batch Undo for a `create_reminders` card: one repository batch delete,
+    /// saved once.
+    func deleteReminders(ids: [UUID]) async {
+        _ = await repository.deleteReminders(ids: ids.map(\.uuidString))
+    }
+
     /// Removes a saved memory through the isolated repository (the memory card's
     /// Undo/Forget action); the card's dynamic `@Query` then collapses to its
     /// "Forgotten" state.
@@ -316,7 +328,14 @@ final class ChatCoordinator {
 
             let assistantText = turn.assistantText
 
-            switch turn.stopReason {
+            // Hitting the output cap mid-batch still leaves every tool_use that
+            // finished streaming intact (a truncated one never reaches
+            // assistantBlocks). Run those and let the model carry on, rather
+            // than throwing away the work.
+            let truncatedWithTools = turn.stopReason == "max_tokens" && !turn.toolUses.isEmpty
+            let stopReason = truncatedWithTools ? "tool_use" : turn.stopReason
+
+            switch stopReason {
             case "tool_use":
                 if !assistantText.isEmpty {
                     transcript.append(.assistant(id: UUID(), text: assistantText))
@@ -352,6 +371,10 @@ final class ChatCoordinator {
 
                 if Task.isCancelled || generation != currentGeneration { return }
 
+                if truncatedWithTools {
+                    resultParams.append(.text("(Your previous response hit the output limit before it finished. Continue with anything that's left.)"))
+                }
+
                 // One user message carrying ALL tool_results, order matching.
                 wireMessages.append(MessageParam(role: "user", content: resultParams))
                 activity = .thinking
@@ -376,6 +399,9 @@ final class ChatCoordinator {
                 return
 
             case "max_tokens":
+                if !assistantText.isEmpty {
+                    transcript.append(.assistant(id: UUID(), text: assistantText))
+                }
                 finishWithNotice(
                     "That response was cut off before it finished. Please try again.",
                     generation: generation
@@ -494,6 +520,11 @@ final class ChatCoordinator {
                 return "Adding “\(title)”"
             }
             return "Adding reminder"
+        case "create_reminders":
+            if case let .array(items)? = input["items"] {
+                return "Adding \(items.count) reminders"
+            }
+            return "Adding reminders"
         case "create_category":
             if let categoryName = input["name"]?.stringValue, !categoryName.isEmpty {
                 return "Creating “\(categoryName)”"
@@ -555,6 +586,46 @@ final class ChatCoordinator {
                 )
             }()
             return ToolExecutionResult(content: result.content, isError: result.isError, card: card)
+
+        case "create_reminders":
+            guard let parsedItems = Self.parseCreateReminders(input) else {
+                return ToolExecutionResult(
+                    content: "The create_reminders arguments were malformed. Provide items: an array of objects, each with title, notes, due_date, category_id, recurrence, and recurrence_anchor_day.",
+                    isError: true,
+                    card: nil
+                )
+            }
+            guard !parsedItems.isEmpty else {
+                return ToolExecutionResult(content: "No items were provided.", isError: true, card: nil)
+            }
+            // Malformed items are reported by index; the valid rest go in one batch.
+            let valid = parsedItems.enumerated().compactMap { index, item in item.map { (index, $0) } }
+            let results = await repository.createReminders(valid.map(\.1), timeZone: context.timeZone)
+            var created: [BatchCreatedItem] = []
+            var createdPayloads: [String] = []
+            var errors: [String] = []
+            for (index, item) in parsedItems.enumerated() where item == nil {
+                errors.append("item \(index): malformed (needs title and category_id)")
+            }
+            for ((index, item), result) in zip(valid, results) {
+                if result.isError {
+                    errors.append("item \(index) (\(item.title)): \(result.content)")
+                } else if let rid = result.reminderID, let snapshot = result.snapshot {
+                    created.append(BatchCreatedItem(
+                        reminderID: rid,
+                        title: result.displayTitle ?? item.title,
+                        summary: result.displaySummary ?? "",
+                        snapshot: snapshot
+                    ))
+                    createdPayloads.append(result.content)
+                }
+            }
+            var content = "Created \(created.count) of \(parsedItems.count) reminders: [\(createdPayloads.joined(separator: ","))]"
+            if !errors.isEmpty {
+                content += "\nNot created (fix and resend only these with create_reminders):\n- " + errors.joined(separator: "\n- ")
+            }
+            let card: TranscriptItem? = created.isEmpty ? nil : .batchCreatedCard(id: UUID(), items: created)
+            return ToolExecutionResult(content: content, isError: created.isEmpty, card: card)
 
         case "create_category":
             guard let parsed = Self.parseCreateCategory(input) else {
@@ -908,6 +979,14 @@ final class ChatCoordinator {
         )
     }
 
+    /// Parses `create_reminders`' `items`. Returns nil when `items` is missing or
+    /// not an array; each element is nil when that item is malformed, so the
+    /// executor can report it by index and still create the rest.
+    nonisolated static func parseCreateReminders(_ input: JSONValue) -> [CreateReminderInput?]? {
+        guard case let .array(items)? = input["items"] else { return nil }
+        return items.map { parseCreateReminder($0) }
+    }
+
     nonisolated static func parseCreateCategory(_ input: JSONValue) -> CreateCategoryInput? {
         guard let name = input["name"]?.stringValue, !name.isEmpty else { return nil }
         return CreateCategoryInput(
@@ -989,7 +1068,8 @@ final class ChatCoordinator {
     speech-to-text; tolerate missing punctuation and homophones.
 
     Tools:
-    - create_reminder: add a new reminder.
+    - create_reminder: add one new reminder.
+    - create_reminders: add MANY reminders in one call (lists of 3+).
     - create_category: propose a new category (asks the user to confirm).
     - find_reminders: search existing reminders; returns each match's exact id.
     - update_reminder: change fields of one existing reminder.
@@ -1006,8 +1086,12 @@ final class ChatCoordinator {
     - Optimistic auto-insert for creations: call create_reminder immediately once \
       you have what you need. The resulting card is the confirmation — do not ask \
       "should I add this?" first.
-    - One tool call per distinct task. A message with three todos means three \
-      create_reminder calls.
+    - Lists: when the user gives three or more tasks (a list, brain dump, or \
+      pasted checklist), put them ALL in a single create_reminders call — not \
+      one create_reminder per item. One or two tasks use create_reminder. Don't \
+      narrate each item before creating; create first, then reply with a short \
+      summary (count, and how you filed them). If some items come back as errors, \
+      resend only those.
     - Managing existing reminders: ALWAYS call find_reminders first to get the \
       exact id before update_reminder, complete_reminder, uncomplete_reminder, or \
       delete_reminder. Never guess an id.
@@ -1101,6 +1185,18 @@ final class ChatCoordinator {
       and timezone provided in the context below. Dates must be real calendar \
       dates.
     """
+}
+
+// MARK: - Batch creation card item
+
+/// One reminder created by `create_reminders`, carried by `.batchCreatedCard`.
+struct BatchCreatedItem: Sendable, Identifiable {
+    let reminderID: UUID
+    let title: String
+    let summary: String
+    let snapshot: ReminderSnapshot
+
+    var id: UUID { reminderID }
 }
 
 // MARK: - Per-turn snapshot types

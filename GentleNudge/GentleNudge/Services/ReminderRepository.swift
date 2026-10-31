@@ -190,7 +190,9 @@ actor ReminderRepository {
 
     // MARK: create_reminder
 
-    func createReminder(_ input: CreateReminderInput, timeZone: TimeZone) -> RepositoryToolResult {
+    /// `save: false` inserts without saving, for `createReminders`, which saves
+    /// the whole batch once (one CloudKit push instead of one per item).
+    func createReminder(_ input: CreateReminderInput, timeZone: TimeZone, save: Bool = true) -> RepositoryToolResult {
         // Resolve the cadence (enum string → RecurrenceType).
         guard let recurrence = RecurrenceType.fromToolValue(input.recurrence) else {
             return .failure(
@@ -273,11 +275,13 @@ actor ReminderRepository {
         reminder.recurrenceAnchorDay = anchorDay
 
         modelContext.insert(reminder)
-        do {
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            return .failure("Couldn't save the reminder: \(error.localizedDescription)")
+        if save {
+            do {
+                try modelContext.save()
+            } catch {
+                modelContext.rollback()
+                return .failure("Couldn't save the reminder: \(error.localizedDescription)")
+            }
         }
 
         let dueString = dueDate.map { Self.dateString($0, timeZone: timeZone) }
@@ -315,6 +319,23 @@ actor ReminderRepository {
             displaySummary: summary,
             snapshot: snapshot
         )
+    }
+
+    // MARK: create_reminders
+
+    /// Creates a batch, validating each item independently (same rules as
+    /// `createReminder`) and saving ONCE. Returns one result per input, in order;
+    /// if the final save fails, every item reports the failure.
+    func createReminders(_ inputs: [CreateReminderInput], timeZone: TimeZone) -> [RepositoryToolResult] {
+        let results = inputs.map { createReminder($0, timeZone: timeZone, save: false) }
+        guard results.contains(where: { !$0.isError }) else { return results }
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            return inputs.map { _ in .failure("Couldn't save the reminders: \(error.localizedDescription)") }
+        }
+        return results
     }
 
     // MARK: find_reminders

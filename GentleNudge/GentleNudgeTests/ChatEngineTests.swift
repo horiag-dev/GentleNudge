@@ -146,6 +146,30 @@ final class ChatToolParsingTests: XCTestCase {
         XCTAssertFalse(RecurrenceType.weekly.isMonthBased)
     }
 
+    // MARK: batch create parsing (create_reminders)
+
+    func test_parseCreateReminders_keepsMalformedItemsAsNilByIndex() {
+        let good = JSONValue.object([
+            "title": .string("Buy milk"),
+            "notes": .null,
+            "due_date": .null,
+            "category_id": .string("11111111-1111-1111-1111-111111111111"),
+            "recurrence": .string("none"),
+            "recurrence_anchor_day": .null
+        ])
+        let bad = JSONValue.object(["title": .string("No category")])
+        let parsed = ChatCoordinator.parseCreateReminders(.object(["items": .array([good, bad, good])]))
+        XCTAssertEqual(parsed?.count, 3)
+        XCTAssertEqual(parsed?[0]?.title, "Buy milk")
+        XCTAssertNil(parsed?[1] ?? nil)
+        XCTAssertNotNil(parsed?[2] ?? nil)
+    }
+
+    func test_parseCreateReminders_missingItems_returnsNil() {
+        XCTAssertNil(ChatCoordinator.parseCreateReminders(.object([:])))
+        XCTAssertNil(ChatCoordinator.parseCreateReminders(.object(["items": .string("x")])))
+    }
+
     // MARK: batch id-list parsing (delete_reminders / complete_reminders)
 
     func test_parseIDList_extractsStrings() {
@@ -354,6 +378,31 @@ final class ChatEngineExecutorTests: XCTestCase {
             reminder.completedAt = Date()
             try? ctx.save()
         }
+    }
+
+    // MARK: create_reminders
+
+    func test_createReminders_createsValidItemsAndReportsInvalidOnes() async throws {
+        let container = try makeContainer()
+        let catID = seedCategory(container, name: "Home")
+        let repo = ReminderRepository(modelContainer: container)
+
+        var inputs = (1...25).map { index in
+            CreateReminderInput(
+                title: "Task \(index)", notes: nil, dueDate: nil,
+                categoryID: catID.uuidString, recurrence: "none", recurrenceAnchorDay: nil
+            )
+        }
+        inputs[3] = CreateReminderInput(
+            title: "Bad date", notes: nil, dueDate: "2026-02-30",
+            categoryID: catID.uuidString, recurrence: "none", recurrenceAnchorDay: nil
+        )
+        let results = await repo.createReminders(inputs, timeZone: tz)
+
+        XCTAssertEqual(results.count, 25)
+        XCTAssertTrue(results[3].isError)
+        XCTAssertEqual(results.filter { !$0.isError }.count, 24)
+        XCTAssertEqual(freshReminders(container).count, 24, "Valid items persist in one batch save.")
     }
 
     // MARK: find_reminders

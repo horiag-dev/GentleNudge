@@ -336,7 +336,8 @@ actor AnthropicClient {
     init() {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 60
-        configuration.timeoutIntervalForResource = 300
+        // A long list at high effort can stream for several minutes.
+        configuration.timeoutIntervalForResource = 600
         self.session = URLSession(configuration: configuration)
     }
 

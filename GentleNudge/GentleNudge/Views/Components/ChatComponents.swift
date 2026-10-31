@@ -355,6 +355,114 @@ struct ReminderCardView: View {
     }
 }
 
+// MARK: - Batch created card (create_reminders)
+
+/// One card for a whole `create_reminders` batch: a count header, a compact
+/// list of titles (first few, then "Show all"), and **Undo all**. Live-binds to
+/// the store through a dynamic `@Query` over the batch's ids, so rows removed
+/// elsewhere drop out. Undo only removes reminders still matching their creation
+/// snapshot; anything edited or completed since is kept.
+struct BatchCreatedCard: View {
+    @Environment(ChatCoordinator.self) private var coordinator
+
+    private let items: [BatchCreatedItem]
+    @Query private var matches: [Reminder]
+    @State private var showAll = false
+
+    private static let collapsedCount = 6
+
+    init(items: [BatchCreatedItem]) {
+        self.items = items
+        let ids = items.map(\.reminderID)
+        _matches = Query(filter: #Predicate<Reminder> { ids.contains($0.id) })
+    }
+
+    private var live: [UUID: Reminder] {
+        Dictionary(matches.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    var body: some View {
+        let live = live
+        let present = items.filter { live[$0.reminderID] != nil }
+        let undoable = present.filter { item in
+            live[item.reminderID].map { item.snapshot.matchesCreation($0) } ?? false
+        }
+        let shown = showAll ? present : Array(present.prefix(Self.collapsedCount))
+
+        HStack {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: present.isEmpty ? "trash" : "checkmark.circle.fill")
+                        .foregroundStyle(present.isEmpty ? Color.secondary : Color.green)
+                        .font(.title3)
+                    Text(present.isEmpty
+                         ? "Removed \(items.count) reminders"
+                         : "Added \(present.count) reminder\(present.count == 1 ? "" : "s")")
+                        .font(.headline)
+                        .foregroundStyle(present.isEmpty ? .secondary : .primary)
+                }
+
+                if !shown.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(shown) { item in
+                            let reminder = live[item.reminderID]
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(reminder?.title ?? item.title)
+                                    .font(.subheadline)
+                                    .strikethrough(reminder?.isCompleted ?? false)
+                                    .lineLimit(2)
+                                if !item.summary.isEmpty {
+                                    Text(item.summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                    .padding(.leading, 4)
+                }
+
+                if !present.isEmpty {
+                    Divider()
+                    HStack(spacing: 12) {
+                        if present.count > Self.collapsedCount {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { showAll.toggle() }
+                            } label: {
+                                Label(showAll ? "Show less" : "Show all \(present.count)",
+                                      systemImage: showAll ? "chevron.up" : "chevron.down")
+                            }
+                        }
+                        if !undoable.isEmpty {
+                            Button {
+                                undo(undoable)
+                            } label: {
+                                Label(undoable.count == present.count ? "Undo all" : "Undo \(undoable.count)",
+                                      systemImage: "arrow.uturn.backward")
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                }
+            }
+            .frame(maxWidth: 420, alignment: .leading)
+            .padding(12)
+            .background(AppColors.secondaryBackground.opacity(present.isEmpty ? 0.5 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Spacer(minLength: 40)
+        }
+    }
+
+    private func undo(_ targets: [BatchCreatedItem]) {
+        let ids = targets.map(\.reminderID)
+        Task { await coordinator.deleteReminders(ids: ids) }
+    }
+}
+
 // MARK: - Confirmation card (shared Approve/Cancel gate)
 
 /// Renders the pending confirmation for a gated tool. Used for both

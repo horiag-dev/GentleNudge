@@ -93,7 +93,7 @@ enum ChatTools {
 
     static var all: [ToolDefinition] {
         [
-            createReminder, createCategory,
+            createReminder, createReminders, createCategory,
             findReminders, updateReminder,
             completeReminder, uncompleteReminder, deleteReminder,
             completeReminders, deleteReminders,
@@ -105,39 +105,76 @@ enum ChatTools {
         ToolDefinition(
             name: "create_reminder",
             description: """
-            Create a single reminder. Call this once per distinct task the user \
-            mentions. Resolve any relative date to a concrete YYYY-MM-DD first. \
-            For recurring reminders, due_date is the first occurrence.
+            Create a single reminder. Use this for one or two tasks; for three or \
+            more, use create_reminders instead. Resolve any relative date to a \
+            concrete YYYY-MM-DD first. For recurring reminders, due_date is the \
+            first occurrence.
+            """,
+            strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
+            input_schema: reminderFieldsSchema
+        )
+    }
+
+    /// Batch creation: one call carrying many reminders, so a long pasted or
+    /// dictated list doesn't burn a tool round-trip (and output budget) per item.
+    static var createReminders: ToolDefinition {
+        ToolDefinition(
+            name: "create_reminders",
+            description: """
+            Create SEVERAL reminders in one call. Use this whenever the user gives \
+            three or more tasks (a list, a brain dump, a pasted checklist) instead of \
+            repeated create_reminder calls. Each item takes the same fields as \
+            create_reminder. Items are validated independently: valid ones are \
+            created, invalid ones are reported back by index so you can fix and \
+            resend only those. For a very long list (more than ~30 items), split it \
+            across a few calls.
             """,
             strict: nil, // OFF: strict on all tools 400s ("schema too complex"); executors validate
             input_schema: .object([
                 "type": .string("object"),
                 "additionalProperties": .bool(false),
                 "properties": .object([
-                    "title": stringProp("Short, action-oriented reminder title."),
-                    "notes": nullableProp("string", "Optional extra detail, or null."),
-                    "due_date": nullableProp(
-                        "string",
-                        "First occurrence date as YYYY-MM-DD, or null for an undated reminder. Required (non-null) for any recurring reminder."
-                    ),
-                    "category_id": stringProp(
-                        "The UUID of an existing category, taken from the category list provided in the system context."
-                    ),
-                    "recurrence": enumProp(
-                        recurrenceValues,
-                        "Recurrence cadence. Use 'none' for a one-off reminder. Only these cadences are supported."
-                    ),
-                    "recurrence_anchor_day": nullableProp(
-                        "integer",
-                        "Day of month (1-31) for month-based recurrences (monthly, quarterly, semiannually, yearly). Null for other cadences. The first due_date must fall on this day (clamped to the month length)."
-                    )
+                    "items": .object([
+                        "type": .string("array"),
+                        "description": .string("The reminders to create, in the order the user listed them."),
+                        "items": reminderFieldsSchema
+                    ])
                 ]),
-                "required": .array([
-                    "title", "notes", "due_date", "category_id",
-                    "recurrence", "recurrence_anchor_day"
-                ].map(JSONValue.string))
+                "required": .array([.string("items")])
             ])
         )
+    }
+
+    /// The per-reminder field schema shared by `create_reminder` and each item of
+    /// `create_reminders`.
+    private static var reminderFieldsSchema: JSONValue {
+        .object([
+            "type": .string("object"),
+            "additionalProperties": .bool(false),
+            "properties": .object([
+                "title": stringProp("Short, action-oriented reminder title."),
+                "notes": nullableProp("string", "Optional extra detail, or null."),
+                "due_date": nullableProp(
+                    "string",
+                    "First occurrence date as YYYY-MM-DD, or null for an undated reminder. Required (non-null) for any recurring reminder."
+                ),
+                "category_id": stringProp(
+                    "The UUID of an existing category, taken from the category list provided in the system context."
+                ),
+                "recurrence": enumProp(
+                    recurrenceValues,
+                    "Recurrence cadence. Use 'none' for a one-off reminder. Only these cadences are supported."
+                ),
+                "recurrence_anchor_day": nullableProp(
+                    "integer",
+                    "Day of month (1-31) for month-based recurrences (monthly, quarterly, semiannually, yearly). Null for other cadences. The first due_date must fall on this day (clamped to the month length)."
+                )
+            ]),
+            "required": .array([
+                "title", "notes", "due_date", "category_id",
+                "recurrence", "recurrence_anchor_day"
+            ].map(JSONValue.string))
+        ])
     }
 
     static var createCategory: ToolDefinition {
