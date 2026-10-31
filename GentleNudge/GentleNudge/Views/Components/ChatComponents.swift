@@ -69,7 +69,7 @@ struct ChatUserBubble: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.accentColor)
+                .background(AppColors.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .textSelection(.enabled)
         }
@@ -365,7 +365,7 @@ struct ConfirmationCard: View {
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
-    private var tint: Color { pending.isDestructive ? .red : .accentColor }
+    private var tint: Color { pending.isDestructive ? .red : AppColors.accent }
     private var icon: String { pending.isDestructive ? "trash" : "folder.badge.plus" }
 
     /// At most this many sample titles are listed; the rest collapse to "+N more".
@@ -588,7 +588,7 @@ struct UpdateDiffCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Image(systemName: "pencil.circle.fill")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(AppColors.accent)
                     Text("Updated \(title)")
                         .font(.subheadline.weight(.semibold))
                 }
@@ -764,7 +764,7 @@ struct MemoryCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "brain")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(AppColors.accent)
                     .font(.title3)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(headerText)
@@ -883,7 +883,7 @@ struct ChatEmptyState: View {
         VStack(spacing: 16) {
             Image(systemName: "sparkles")
                 .font(.system(size: 44))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(AppColors.accent)
             VStack(spacing: 4) {
                 Text("Assistant")
                     .font(.title2.weight(.semibold))
@@ -901,7 +901,7 @@ struct ChatEmptyState: View {
                         } label: {
                             Text("“\(suggestion)”")
                                 .font(.subheadline)
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(AppColors.accent)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
                                 .background(AppColors.secondaryBackground)

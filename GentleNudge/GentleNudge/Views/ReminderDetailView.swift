@@ -172,9 +172,9 @@ struct ReminderDetailView: View {
                                             .font(.caption)
                                     }
                                     .font(.subheadline)
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(AppColors.accent)
                                     .padding(Constants.Spacing.sm)
-                                    .background(Color.blue.opacity(0.1))
+                                    .background(AppColors.accent.opacity(0.1))
                                     .clipShape(RoundedRectangle(cornerRadius: Constants.CornerRadius.sm))
                                 }
                             }

@@ -237,7 +237,7 @@ struct MacContentView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                     SmartListCard(
                         icon: "calendar.circle.fill",
-                        color: .blue,
+                        color: AppColors.accent,
                         title: "Today",
                         count: lists.needsAttention.count,
                         isSelected: selectedSidebarItem == .today
@@ -685,8 +685,8 @@ struct MacContentView: View {
 
     private var sidebarColor: Color {
         switch selectedSidebarItem {
-        case .chat: return .accentColor
-        case .today: return .blue
+        case .chat: return AppColors.accent
+        case .today: return AppColors.accent
         case .scheduled: return .red
         case .all: return .gray
         case .recurring: return .orange
@@ -966,7 +966,7 @@ struct MacReminderRow: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        .background(isSelected ? AppColors.accent.opacity(0.1) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture { onTap() }

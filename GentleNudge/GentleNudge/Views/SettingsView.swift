@@ -207,6 +207,9 @@ struct SettingsView: View {
                 }
                 #endif
 
+                // MARK: - Appearance
+                ThemePickerSection()
+
                 // MARK: - Display
                 Section {
                     Picker(selection: $habitVisibilityRaw) {

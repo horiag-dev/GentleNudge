@@ -228,6 +228,7 @@ struct GentleNudgeApp: App {
             }
             .environment(chatCoordinator)
             .environment(calendarCoordinator)
+            .appThemed()
         }
         .modelContainer(sharedModelContainer)
         #if os(macOS)
