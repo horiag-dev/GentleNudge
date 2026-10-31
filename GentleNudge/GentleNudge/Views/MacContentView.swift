@@ -352,10 +352,15 @@ struct MacContentView: View {
                 VStack(spacing: 0) {
                     // Header
                     HStack {
-                        Text(sidebarTitle)
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .foregroundStyle(sidebarColor)
+                        if ThemeManager.shared.effectiveTheme == .system {
+                            Text(sidebarTitle)
+                                .font(.largeTitle)
+                                .fontWeight(.bold)
+                                .foregroundStyle(sidebarColor)
+                        } else {
+                            Text(sidebarTitle)
+                                .themedScreenTitle()
+                        }
                         Spacer()
                         Button { showingAddReminder = true } label: {
                             Image(systemName: "plus")
@@ -379,7 +384,8 @@ struct MacContentView: View {
                     }
                 }
                 .frame(minWidth: 400)
-                .background(AppColors.background)
+                .themedInk()
+                .background { ThemedPageBackground() }
 
                 // Detail Panel (only shows when reminder selected)
                 if let reminder = selectedReminder {
@@ -796,15 +802,31 @@ struct MacSectionCard<Content: View>: View {
                 Image(systemName: icon)
                     .foregroundStyle(color)
                 Text(title)
-                    .font(.headline)
+                    .themedSectionTitle()
             }
+            .themedHeaderRule()
 
             content
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .modifier(MacSectionChrome(color: color))
+    }
+}
+
+/// System keeps the original Mac card (12pt padding/radius, flat wash);
+/// every other theme uses the shared themed section card.
+private struct MacSectionChrome: ViewModifier {
+    let color: Color
+
+    func body(content: Content) -> some View {
+        if ThemeManager.shared.effectiveTheme == .system {
+            content
+                .padding(12)
+                .background(color.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else {
+            content.themedSectionCard(tint: color)
+        }
     }
 }
 
@@ -905,9 +927,8 @@ struct MacReminderRow: View {
                     ? "checkmark.circle.fill"
                     : (isInProgress ? "circle.lefthalf.filled" : "circle"))
                     .font(.title3)
-                    .foregroundStyle(isChecked
-                        ? Color.green
-                        : (isInProgress ? Color.indigo : Color.secondary))
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style
+                        .completionColor(isCompleted: isChecked, isInProgress: isInProgress))
                     // ~44pt hit target without growing the visible icon.
                     .contentShape(Rectangle().inset(by: -10))
             }

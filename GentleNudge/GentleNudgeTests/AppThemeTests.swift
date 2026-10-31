@@ -95,4 +95,87 @@ final class AppThemeTests: XCTestCase {
     func test_systemTheme_hasNoCustomPalette() {
         XCTAssertNil(AppTheme.system.hexPalette)
     }
+
+    // MARK: Style tokens
+
+    /// System must keep the pre-theme main screen: no custom type, colors,
+    /// gradients, or surfaces.
+    func test_systemStyle_isUnchangedLook() {
+        let s = AppTheme.system.style
+        XCTAssertNil(s.fontDesign)
+        XCTAssertNil(s.titleWidth)
+        XCTAssertNil(s.ink)
+        XCTAssertNil(s.secondaryInk)
+        XCTAssertNil(s.headerInk)
+        XCTAssertNil(s.circle)
+        XCTAssertNil(s.inProgress)
+        XCTAssertNil(s.pageGradient)
+        XCTAssertFalse(s.headerUppercased)
+        XCTAssertFalse(s.headerRule)
+        XCTAssertEqual(s.card, .system)
+        XCTAssertEqual(s.row, .system)
+        XCTAssertEqual(s.card.tintWash, 0.08)
+        XCTAssertEqual(s.card.cornerRadius, Constants.CornerRadius.lg)
+        XCTAssertEqual(s.row.cornerRadius, Constants.CornerRadius.md)
+    }
+
+    /// The themes must actually differ from each other on the main screen —
+    /// not just in accent color.
+    func test_customThemes_haveDistinctPersonalities() {
+        let custom = AppTheme.allCases.filter { $0 != .system }
+        let signatures = Set(custom.map { theme -> String in
+            let s = theme.style
+            return "\(String(describing: s.fontDesign))|\(String(describing: s.titleWidth))|\(s.card.cornerRadius)|\(s.card.borderWidth)|\(s.headerUppercased)"
+        })
+        XCTAssertEqual(signatures.count, custom.count)
+        XCTAssertEqual(AppTheme.calm.style.fontDesign, .rounded)
+        XCTAssertEqual(AppTheme.paper.style.fontDesign, .serif)
+        XCTAssertNil(AppTheme.paper.style.card.shadow, "Paper is flat")
+        XCTAssertNil(AppTheme.highContrast.style.card.shadow)
+        XCTAssertEqual(AppTheme.highContrast.style.card.tintWash, 0, "High Contrast: no translucency")
+    }
+
+    /// Every text token is ≥ 4.5:1 on every surface it can sit on (card, row,
+    /// page background, both page-gradient stops), in light and dark; glyph
+    /// tokens (completion / in-progress circles) are ≥ 3:1 on cards and rows.
+    func test_customThemes_styleTokensMeetAA() {
+        for theme in AppTheme.allCases {
+            guard let palette = theme.hexPalette else { continue }
+            let s = theme.style
+            guard let card = s.card.fill, let row = s.row.fill else {
+                return XCTFail("\(theme): custom themes need opaque card and row fills")
+            }
+            var surfaces: [(String, ThemeHexColor)] = [("card", card), ("row", row), ("background", palette.background)]
+            if let g = s.pageGradient {
+                surfaces += [("gradient top", g.top), ("gradient bottom", g.bottom)]
+            }
+            var pageTexts: [(String, ThemeHexColor?)] = [("title", s.titleInk)]
+            if let g = s.titleGradient { pageTexts += [("title gradient start", g.0), ("title gradient end", g.1)] }
+            let texts: [(String, ThemeHexColor?)] = [("ink", s.ink), ("secondaryInk", s.secondaryInk), ("headerInk", s.headerInk)]
+
+            for (mode, pick) in [("light", { (c: ThemeHexColor) in c.light }), ("dark", { (c: ThemeHexColor) in c.dark })] {
+                for (name, color) in texts {
+                    guard let color else { XCTFail("\(theme): missing \(name)"); continue }
+                    for (surfaceName, surface) in surfaces {
+                        XCTAssertGreaterThanOrEqual(ThemeContrast.ratio(pick(color), pick(surface)), 4.5,
+                                                    "\(theme) \(mode): \(name) on \(surfaceName)")
+                    }
+                }
+                for (name, color) in pageTexts {
+                    guard let color else { continue }
+                    for (surfaceName, surface) in surfaces where surfaceName != "card" && surfaceName != "row" {
+                        XCTAssertGreaterThanOrEqual(ThemeContrast.ratio(pick(color), pick(surface)), 4.5,
+                                                    "\(theme) \(mode): \(name) on \(surfaceName)")
+                    }
+                }
+                for (name, color) in [("circle", s.circle), ("inProgress", s.inProgress)] {
+                    guard let color else { XCTFail("\(theme): missing \(name)"); continue }
+                    for (surfaceName, surface) in [("card", card), ("row", row)] {
+                        XCTAssertGreaterThanOrEqual(ThemeContrast.ratio(pick(color), pick(surface)), 3.0,
+                                                    "\(theme) \(mode): \(name) on \(surfaceName)")
+                    }
+                }
+            }
+        }
+    }
 }

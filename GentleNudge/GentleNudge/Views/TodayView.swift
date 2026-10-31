@@ -176,8 +176,7 @@ struct TodayView: View {
     private var titleRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: Constants.Spacing.xs) {
             Text("Gentle Nudge")
-                .font(.largeTitle)
-                .fontWeight(.bold)
+                .themedScreenTitle()
             // Small enough to ignore, there when you need to tell builds apart.
             Text("v\(SettingsView.appVersionText)")
                 .font(.caption2)
@@ -359,6 +358,7 @@ struct TodayView: View {
                     }
                     }
                     .padding()
+                    .themedInk()
                 }
                 #if os(iOS)
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -372,7 +372,7 @@ struct TodayView: View {
                 }
                 #endif
             }
-            .background(AppColors.background)
+            .background { ThemedPageBackground() }
             .navigationTitle("Gentle Nudge")
             #if os(iOS)
             // Title + search now live in the custom header (`titleRow` /
@@ -455,7 +455,7 @@ struct MorningBriefingCard: View {
                         Image(systemName: "sparkles")
                             .foregroundStyle(AppColors.accent)
                         Text("Morning Briefing")
-                            .font(.headline)
+                            .themedSectionTitle()
                         Spacer()
                         Button(action: onDismiss) {
                             Image(systemName: "xmark.circle.fill")
@@ -499,42 +499,33 @@ struct TodaySectionHeader: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(tint)
             Text(title)
-                .font(.headline)
+                .themedSectionTitle()
             Spacer()
             if let count {
                 Text(count)
                     .font(.subheadline.weight(.medium))
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style.secondaryInkColor)
             }
         }
+        .themedHeaderRule()
     }
 }
 
 extension View {
     /// Shared container chrome for a Today section: consistent padding, a soft
     /// tint wash, and a continuous corner radius.
+    /// The look comes from the theme (`ThemeCardStyle`); System keeps the
+    /// original wash.
     func todaySectionCard(tint: Color) -> some View {
-        self
-            .padding(Constants.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: Constants.CornerRadius.lg, style: .continuous)
-                    .fill(tint.opacity(0.08))
-            )
+        themedSectionCard(tint: tint)
     }
 
     /// Shared chrome for a reminder card inside a section: solid fill plus a
     /// hairline border so cards keep their edge in both light and dark mode.
+    /// Themed via `ThemeRowStyle`; System keeps the original look.
     func todayRowCard() -> some View {
-        self
-            .background(
-                AppColors.background,
-                in: RoundedRectangle(cornerRadius: Constants.CornerRadius.md, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Constants.CornerRadius.md, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-            )
+        themedRowCard()
     }
 }
 
@@ -643,7 +634,8 @@ struct HabitRow: View {
             } label: {
                 Image(systemName: isCompletedToday ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(isCompletedToday ? .green : .secondary)
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style
+                        .completionColor(isCompleted: isCompletedToday, isInProgress: false))
                     .contentTransition(.symbolEffect(.replace))
                     // ~44pt hit target without growing the visible icon.
                     .contentShape(Rectangle().inset(by: -10))
@@ -828,9 +820,8 @@ struct UpcomingReminderRow: View {
                     ? "checkmark.circle.fill"
                     : (reminder.isInProgress ? "circle.lefthalf.filled" : "circle"))
                     .font(.body)
-                    .foregroundStyle(reminder.isCompleted
-                        ? Color.green
-                        : (reminder.isInProgress ? Color.indigo : Color.secondary))
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style
+                        .completionColor(isCompleted: reminder.isCompleted, isInProgress: reminder.isInProgress))
                     // ~44pt hit target without growing the visible icon.
                     .contentShape(Rectangle().inset(by: -12))
             }
@@ -989,9 +980,8 @@ struct NeedsAttentionRow: View {
                     ? "checkmark.circle.fill"
                     : (reminder.isInProgress ? "circle.lefthalf.filled" : "circle"))
                     .font(.body)
-                    .foregroundStyle(reminder.isCompleted
-                        ? Color.green
-                        : (reminder.isInProgress ? Color.indigo : Color.secondary))
+                    .foregroundStyle(ThemeManager.shared.effectiveTheme.style
+                        .completionColor(isCompleted: reminder.isCompleted, isInProgress: reminder.isInProgress))
                     .contentTransition(.symbolEffect(.replace))
                     // ~44pt hit target without growing the visible icon.
                     .contentShape(Rectangle().inset(by: -12))
@@ -1194,18 +1184,19 @@ struct HomeCategorySection: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(category.color)
                     Text(category.name)
-                        .font(.headline)
+                        .themedSectionTitle()
                     Spacer()
                     Text("\(reminders.count)")
                         .font(.subheadline.weight(.medium))
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ThemeManager.shared.effectiveTheme.style.secondaryInkColor)
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }
             }
             .buttonStyle(.plain)
+            .themedHeaderRule()
 
             // Active reminders
             if !activeReminders.isEmpty {

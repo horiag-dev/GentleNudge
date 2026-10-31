@@ -58,9 +58,8 @@ struct ReminderRow: View {
                         ? "checkmark.circle.fill"
                         : (reminder.isInProgress ? "circle.lefthalf.filled" : "circle"))
                         .font(.body)
-                        .foregroundStyle(reminder.isCompleted
-                            ? Color.green
-                            : (reminder.isInProgress ? Color.indigo : Color.secondary))
+                        .foregroundStyle(ThemeManager.shared.effectiveTheme.style
+                            .completionColor(isCompleted: reminder.isCompleted, isInProgress: reminder.isInProgress))
                         .contentTransition(.symbolEffect(.replace))
                         // ~44pt hit target without growing the visible icon.
                         .contentShape(Rectangle().inset(by: -12))
