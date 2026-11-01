@@ -42,7 +42,6 @@ struct ReminderRow: View {
     var body: some View {
         NavigationLink {
             ReminderDetailView(reminder: reminder)
-                .unthemedPresentation()
         } label: {
             HStack(alignment: .top, spacing: Constants.Spacing.xs) {
                 // Completion Button
@@ -209,7 +208,6 @@ struct ReminderRow: View {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
             }
-            .unthemedPresentation()
             .presentationDetents([.medium, .large])
         }
     }

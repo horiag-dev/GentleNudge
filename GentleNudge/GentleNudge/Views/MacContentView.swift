@@ -378,7 +378,6 @@ struct MacContentView: View {
                     }
                 }
                 .frame(minWidth: 400)
-                .themedFontDesign()
                 .background { ThemedPageBackground() }
 
                 // Detail Panel (only shows when reminder selected)

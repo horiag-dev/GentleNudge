@@ -375,7 +375,6 @@ struct TodayView: View {
                 }
                 #endif
             }
-            .themedFontDesign()
             .background { ThemedPageBackground() }
             .navigationTitle("Gentle Nudge")
             #if os(iOS)
@@ -687,7 +686,6 @@ struct HabitRow: View {
         ])
         .sheet(isPresented: $showingHeatmap) {
             HabitDetailSheet(habit: habit)
-                .unthemedPresentation()
         }
         #endif
         // VoiceOver: one element per row (title + status + history), with the
@@ -898,7 +896,6 @@ struct UpcomingReminderRow: View {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
             }
-            .unthemedPresentation()
             .presentationDetents([.medium, .large])
         }
         // VoiceOver: one element per row, with the toggle, the (otherwise
@@ -1060,7 +1057,6 @@ struct NeedsAttentionRow: View {
             NavigationStack {
                 ReminderDetailView(reminder: reminder)
             }
-            .unthemedPresentation()
             .presentationDetents([.medium, .large])
         }
         // VoiceOver: one element per row, with the toggle, the (otherwise
@@ -1186,7 +1182,6 @@ struct HomeCategorySection: View {
             // Header
             NavigationLink {
                 CategoryDetailView(category: category)
-                    .unthemedPresentation()
             } label: {
                 HStack(spacing: Constants.Spacing.xs) {
                     Image(systemName: category.icon)

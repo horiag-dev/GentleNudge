@@ -234,17 +234,25 @@ final class ThemeManager {
 
 // MARK: - Root modifier
 
-/// Applied once at the app root: sets the app-wide tint and keeps the
-/// time-of-day theme current (on foregrounding and once a minute).
+/// Applied once at the app root: sets the app-wide tint and typeface, and
+/// keeps the time-of-day theme current (on foregrounding and once a minute).
 private struct AppThemeRootModifier: ViewModifier {
     @Environment(\.scenePhase) private var scenePhase
     private let theme = ThemeManager.shared
     private let minuteTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     func body(content: Content) -> some View {
+        let style = theme.effectiveTheme.style
         content
             .tint(theme.palette.accent)
-            .onAppear { theme.refreshTimeOfDay() }
+            .fontDesign(style.fontDesign)
+            .onAppear {
+                theme.refreshTimeOfDay()
+                Self.applyNavigationBarFonts(style.fontDesign)
+            }
+            .onChange(of: theme.effectiveTheme) { _, newTheme in
+                Self.applyNavigationBarFonts(newTheme.style.fontDesign)
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { theme.refreshTimeOfDay() }
             }
@@ -252,6 +260,40 @@ private struct AppThemeRootModifier: ViewModifier {
                 if theme.followsTimeOfDay { theme.refreshTimeOfDay() }
             }
     }
+
+    /// Navigation-bar titles are drawn by UIKit, so they don't see SwiftUI's
+    /// `fontDesign`; give them the same face through the appearance proxy.
+    /// Applies to bars created after the change (new screens and sheets).
+    private static func applyNavigationBarFonts(_ design: Font.Design?) {
+        #if os(iOS)
+        let appearance = UINavigationBar.appearance()
+        guard let design, let uiDesign = Self.uiDesign(design) else {
+            appearance.titleTextAttributes = nil
+            appearance.largeTitleTextAttributes = nil
+            return
+        }
+        func font(_ style: UIFont.TextStyle, _ weight: UIFont.Weight) -> UIFont {
+            let base = UIFont.preferredFont(forTextStyle: style)
+            let descriptor = base.fontDescriptor
+                .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: weight]])
+                .withDesign(uiDesign) ?? base.fontDescriptor
+            return UIFont(descriptor: descriptor, size: base.pointSize)
+        }
+        appearance.titleTextAttributes = [.font: font(.headline, .semibold)]
+        appearance.largeTitleTextAttributes = [.font: font(.largeTitle, .bold)]
+        #endif
+    }
+
+    #if os(iOS)
+    private static func uiDesign(_ design: Font.Design) -> UIFontDescriptor.SystemDesign? {
+        switch design {
+        case .rounded: return .rounded
+        case .serif: return .serif
+        case .monospaced: return .monospaced
+        default: return nil
+        }
+    }
+    #endif
 }
 
 extension View {
@@ -329,7 +371,7 @@ private struct ThemeSwatchButton: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Aa")
                         .font(style.titleFont)
-                        .fontWidth(style.titleWidth ?? style.fontWidth)
+                        .fontWidth(style.titleWidth)
                         .foregroundStyle(style.titleForeground)
                         .dynamicTypeSize(.large)
                         .lineLimit(1)
@@ -340,7 +382,7 @@ private struct ThemeSwatchButton: View {
                         Text("Today")
                             .font(.system(size: ThemeSwatchMetrics.headerFontSize,
                                           weight: style.headerUppercased ? .bold : .semibold))
-                            .fontWidth(style.headerWidth ?? style.fontWidth)
+                            .fontWidth(style.headerWidth)
                             .textCase(style.headerUppercased ? .uppercase : nil)
                             .tracking(style.swatchHeaderTracking)
                             .foregroundStyle(style.headerInkColor)
@@ -352,7 +394,6 @@ private struct ThemeSwatchButton: View {
                                                         padding: ThemeSwatchMetrics.cardPadding))
                 }
                 .fontDesign(style.fontDesign)
-                .fontWidth(style.fontWidth)
                 .padding(ThemeSwatchMetrics.outerPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: ThemeSwatchMetrics.height, alignment: .top)
@@ -499,11 +540,9 @@ enum ThemeSemanticRole: CaseIterable {
 /// Per-theme personality for the main screens: typography, text colors and
 /// card surfaces. `.system` leaves every value at the pre-theme look.
 struct ThemeStyle {
-    // Typography — applied to themed content (Today, the Mac list), not the
-    // app shell, so navigation titles and Settings stay consistent.
+    // Typography — applied app-wide at the root (`appThemed()`); the big
+    // Today title can use its own face via `titleFont`.
     var fontDesign: Font.Design?
-    /// Body-text width for themed content (`nil` = standard).
-    var fontWidth: Font.Width?
     var titleFont: Font = .largeTitle.weight(.bold)
     var titleWidth: Font.Width?
     /// Two-stop gradient for the big title (`nil` = plain `titleInk`).
@@ -649,13 +688,11 @@ extension AppTheme {
             )
 
         case .dusk:
-            // Twilight, kept quiet: an indigo-to-plum title, small tracked
+            // Twilight, kept quiet: an indigo-to-plum serif title, small tracked
             // caps headers, faint tint washes; the glow is for dark mode only.
             return ThemeStyle(
                 fontDesign: nil,
-                fontWidth: .condensed,
-                titleFont: .largeTitle.weight(.heavy),
-                titleWidth: .compressed,
+                titleFont: .system(.largeTitle, design: .serif, weight: .bold),
                 titleGradient: (.init(light: 0x4B45B8, dark: 0xB0A6FF),
                                 .init(light: 0x75469E, dark: 0xD8B0EE)),
                 headerFont: .subheadline.weight(.bold),
@@ -903,7 +940,7 @@ private struct ThemedSectionTitleModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(style.headerFont)
-            .fontWidth(style.headerWidth ?? style.fontWidth)
+            .fontWidth(style.headerWidth)
             .textCase(style.headerUppercased ? .uppercase : nil)
             .tracking(style.headerTracking)
             .foregroundStyle(style.headerInkColor)
@@ -922,7 +959,7 @@ private struct ThemedScreenTitleModifier: ViewModifier {
         let usesFallback = style.titleGradient == nil && style.titleInk == nil
         content
             .font(style.titleFont)
-            .fontWidth(wide ? style.titleWidth : style.fontWidth)
+            .fontWidth(wide ? style.titleWidth : nil)
             .foregroundStyle(usesFallback ? (fallback ?? style.titleForeground) : style.titleForeground)
             // Wide titles would otherwise wrap "Gentle Nudge".
             .lineLimit(wide ? 1 : nil)
@@ -994,21 +1031,6 @@ extension View {
     /// Editorial hairline under a section header (Paper); no-op elsewhere.
     func themedHeaderRule(theme: AppTheme = ThemeManager.shared.effectiveTheme) -> some View {
         modifier(ThemedHeaderRuleModifier(style: theme.style))
-    }
-
-    /// The theme's font design for themed content (Today, the Mac list).
-    /// Scoped there rather than app-wide so navigation titles, Settings and
-    /// the tab bar stay in one typeface.
-    func themedFontDesign(theme: AppTheme = ThemeManager.shared.effectiveTheme) -> some View {
-        fontDesign(theme.style.fontDesign)
-            .fontWidth(theme.style.fontWidth)
-    }
-
-    /// Put on screens presented or pushed from themed content (detail sheets,
-    /// category pages) so the themed typeface doesn't leak into a screen with
-    /// a standard navigation title.
-    func unthemedPresentation() -> some View {
-        fontDesign(nil).fontWidth(nil)
     }
 
     /// Big screen-title typography (font, width, gradient/ink). `fallback`
